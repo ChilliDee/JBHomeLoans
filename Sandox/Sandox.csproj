@@ -10,8 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The base classes for the _C / _S / _RC pattern (ST_Subscriptions, ObservableProperty, InterceptorErrorHandlingFactory)
-         live in the Framework folder. BusinessLogic.Core is not referenced. Castle.Core is what the interceptor factory uses. -->
+    <!-- Castle.Core powers InterceptorErrorHandlingFactory (Framework/Interceptors) -->
     <PackageReference Include="Castle.Core" Version="5.2.1" />
     <PackageReference Include="MimeKit" Version="4.16.0" />
     <PackageReference Include="MsgReader" Version="6.0.11" />
@@ -22,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="Components\Pages\" />
+    <Folder Include="Components\Domains\Utlility\Loaders\" />
   </ItemGroup>
 
 </Project>

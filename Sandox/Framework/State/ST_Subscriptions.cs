@@ -1,96 +1,99 @@
-namespace Mortgage.State;
+using Microsoft.Extensions.DependencyInjection;
+using System.Linq;
 
-// Local Sandox version of the CRM framework class of the same name (no BusinessLogic.Core package).
-// Base class for every _RC sub-class: owns ResponseData and the request status flags.
-public abstract class ST_Subscriptions<T> where T : ST_DTOResponse
+namespace Mortgage.State
 {
-    protected IServiceScope? _serviceScope;
-    protected IServiceProvider _serviceProvider;
-
-    public T ResponseData { get; set; }
-
-    protected ST_Subscriptions(T responseData, IServiceProvider serviceProvider)
+    public abstract class ST_Subscriptions<T> where T : ST_DTOResponse, new()
     {
-        ResponseData = responseData;
-        _serviceProvider = serviceProvider;
-    }
+        //private List<Func<T, Task>> _dataCallbacks;
+        //private Func<Task> _stateChangeCallBack;
+        protected IServiceScope _serviceScope;
+        protected IServiceProvider _serviceProvider;
+        public T ResponseData { get; set; }
 
-    protected void SetRequestLoading()
-    {
-        ResponseData.ErrorMessage = null;
-        ResponseData.RequestStatus.RequestAttempted = true;
-        ResponseData.RequestStatus.RequestIsLoading = true;
-        ResponseData.RequestStatus.RequestHasFailed = false;
-        ResponseData.RequestStatus.RequestHasCompleted = false;
-    }
 
-    protected void SetRequestSucceeded()
-    {
-        ResponseData.RequestStatus.RequestIsLoading = false;
-        ResponseData.RequestStatus.RequestHasFailed = false;
-        ResponseData.RequestStatus.RequestHasCompleted = true;
-        ResponseData.RequestStatus.InitialLoadCompletedSuccessfully = true;
-    }
-
-    protected void SetRequestFailed(string? errorMessage = null)
-    {
-        ResponseData.ErrorMessage = errorMessage;
-        ResponseData.RequestStatus.RequestIsLoading = false;
-        ResponseData.RequestStatus.RequestHasFailed = true;
-        ResponseData.RequestStatus.RequestHasCompleted = false;
-        ResponseData.RequestStatus.RequestHasResults = false;
-    }
-
-    protected abstract void SetRequestHasResults();
-
-    protected abstract void CreateScope();
-
-    protected void DisposeScope()
-    {
-        _serviceScope?.Dispose();
-        _serviceScope = null;
-    }
-
-    public async Task InvokeCallBackIfNoDebounceAsync(Func<Task> callback)
-    {
-        if (!ResponseData.HasBeenDebounced)
+        public ST_Subscriptions(T responseData, IServiceProvider serviceProvider)
         {
-            await callback();
+            ResponseData = responseData;
+            _serviceProvider = serviceProvider;
         }
-    }
 
-    public void InvokeCallBackIfNoDebounce(Action callback)
-    {
-        if (!ResponseData.HasBeenDebounced)
+        protected void SetRequestSucceeded()
         {
-            callback();
+            ResponseData.RequestStatus.RequestIsLoading = false;
+            ResponseData.RequestStatus.RequestHasCompleted = true;
+            ResponseData.HasBeenDebounced = false;
+            ResponseData.RequestStatus.InitialLoadCompletedSuccessfully = true;
         }
-    }
 
-    public void InvokeCallBackIfNoDebounce<TParam>(Action<TParam> callback, TParam param)
-    {
-        if (!ResponseData.HasBeenDebounced)
+        protected void SetRequestFailed(string errorMessage = null)
         {
-            callback(param);
+            ResponseData.RequestStatus.RequestIsLoading = false;
+            ResponseData.RequestStatus.RequestHasFailed = true;
+            ResponseData.ErrorMessage = errorMessage;   
         }
-    }
 
-    public void InvokeCallBackIfCompleted(Action callback)
-    {
-        if (ResponseData.RequestStatus.RequestHasCompleted)
+        protected void SetRequestLoading()
+        {            
+            ResponseData.RequestStatus.RequestIsLoading = true;
+            ResponseData.RequestStatus.RequestHasFailed = false;
+            ResponseData.RequestStatus.RequestHasResults = false;
+            ResponseData.RequestStatus.RequestHasCompleted = false;
+            ResponseData.ErrorMessage = string.Empty;       
+        }
+
+        protected abstract void SetRequestHasResults();
+
+        protected abstract void CreateScope();
+
+        protected void DisposeScope()
         {
-            callback();
+            if (_serviceScope == null) return;
+            _serviceScope.Dispose();
         }
-    }
 
-    public async Task InvokeCallBackIfCompletedAsync(Func<Task> callback)
-    {
-        if (ResponseData.RequestStatus.RequestHasCompleted)
+        public async Task InvokeCallBackIfNoDebounceAsync(Func<Task> callback)
         {
-            await callback();
+            if (!ResponseData.HasBeenDebounced)
+            {
+                await callback();
+            }
         }
-    }
 
-    // Kept so components copied from the CRM compile. Nothing subscribes to an RC in Sandox.
-    public Task InvokeSubscriptionCallbacksAsync() => Task.CompletedTask;
+        public void InvokeCallBackIfNoDebounce(Action callback)
+        {
+            if (!ResponseData.HasBeenDebounced)
+            {
+                callback();
+            }
+        }
+
+        public void InvokeCallBackIfNoDebounce<T>(Action<T> callback, T param)
+        {
+            if (!ResponseData.HasBeenDebounced)
+            {
+                callback(param);
+            }
+        }
+
+        public void InvokeCallBackIfCompleted(Action callback)
+        {
+            if (ResponseData.RequestStatus.RequestHasCompleted)
+            {
+                callback();
+            }
+        }
+
+        public async Task InvokeCallBackIfCompletedAsync(Func<Task> callback)
+        {
+            if (ResponseData.RequestStatus.RequestHasCompleted)
+            {
+                await callback();
+            }
+        }
+
+        public async Task InvokeSubscriptionCallbacksAsync()
+        {  
+        }
+    }    
 }

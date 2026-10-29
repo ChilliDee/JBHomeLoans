@@ -442,7 +442,7 @@
         if (isInvalid)
             return "bg-white border-red-500 focus:ring-red-500 focus:border-red-500";
 
-        return "bg-white border-gray-300 focus:ring-accent-500 focus:border-accent-500";
+        return "bg-white border-gray-300 focus:ring-blue-500 focus:border-blue-500";
     }
 
     // -------------------------------------------------------------------------
@@ -535,9 +535,9 @@
             } else if (!day.selectable) {
                 classes += "text-gray-400 cursor-not-allowed ";
             } else {
-                classes += "hover:bg-accent-100 cursor-pointer ";
-                if (day.isSelected) classes += "bg-accent-600 text-white hover:bg-accent-700 ";
-                else if (day.isToday) classes += "bg-accent-100 text-accent-600 font-semibold ";
+                classes += "hover:bg-blue-100 cursor-pointer ";
+                if (day.isSelected) classes += "bg-blue-600 text-white hover:bg-blue-700 ";
+                else if (day.isToday) classes += "bg-blue-100 text-blue-600 font-semibold ";
                 else classes += "text-gray-900 ";
             }
             return classes.trim();
@@ -574,7 +574,7 @@
 
             if (inst.showTodayButton) {
                 html += '<div class="mt-4 pt-3 border-t border-gray-200">'
-                    + '<button type="button" data-role="today" class="w-full px-3 py-2 text-sm bg-accent-600 text-white rounded-md hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-500">Today</button>'
+                    + '<button type="button" data-role="today" class="w-full px-3 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500">Today</button>'
                     + '</div>';
             }
 

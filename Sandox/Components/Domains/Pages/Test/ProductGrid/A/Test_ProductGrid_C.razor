@@ -1,0 +1,69 @@
+@using FE.Components.Domains.Pages.Test.ProductGrid.Card.A
+
+<section id="shop" class="mx-auto max-w-6xl px-6 py-16">
+    <div id="@_d.I.ClassName">
+        <h2 class="text-3xl font-bold text-stone-900" style="font-family: Fredoka, ui-rounded, system-ui, sans-serif">Pick your fluff</h2>
+        <p class="mt-1 text-stone-700">Sample products and sample prices, just for the demo.</p>
+
+        @if (_d.I.InitialisationCompleted == false || _d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestIsLoading)
+        {
+            <div class="mt-8 grid animate-pulse gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                @for (int s = 0; s < 6; s++)
+                {
+                    <div class="h-80 rounded-3xl bg-white ring-1 ring-rose-100"></div>
+                }
+            </div>
+        }
+        else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasFailed)
+        {
+            <div class="mt-8 flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                <svg class="mt-0.5 h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+                </svg>
+                @_d.RC_Internal.Initialise_HD_.ResponseData.ErrorMessage
+            </div>
+        }
+        else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasCompleted)
+        {
+            var visible = _act.VisibleProducts();
+
+            <div class="mt-6 flex flex-wrap items-center gap-2">
+                <button type="button"
+                        class="@_switch.CategoryChip("all")"
+                        @onclick="async () => { _state.ShowAllCategories(); await _d.StateUpdate(); }">
+                    All
+                    <span class="@_switch.CategoryCount("all")">@_act.CountCategory("all")</span>
+                </button>
+                @foreach (var category in _d.I.Inputs.Categories)
+                {
+                    <button type="button"
+                            class="@_switch.CategoryChip(category.Key)"
+                            @onclick="async () => { _state.SetCategory(category.Key); await _d.StateUpdate(); }">
+                        @category.Name
+                        <span class="@_switch.CategoryCount(category.Key)">@_act.CountCategory(category.Key)</span>
+                    </button>
+                }
+            </div>
+
+            @if (visible.Count == 0)
+            {
+                <p class="mt-10 text-center text-stone-700">Nothing here yet. Try another category.</p>
+            }
+
+            <div class="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                @foreach (var product in visible)
+                {
+                    <Test_ProductGrid_Card_C @key="product.Id"
+                                             Product="product"
+                                             CategoryName="@_act.CategoryName(product.CategoryKey)"
+                                             IsAdding="@_act.IsAddingToBasket()"
+                                             OnAddToBasket="async (int productId) => {
+                                                 await _req.AddToBasketAsync(productId);
+                                                 _state.ApplyBasketResponse();
+                                                 await _d.StateUpdate();
+                                             }" />
+                }
+            </div>
+        }
+    </div>
+</section>

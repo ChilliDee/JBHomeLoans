@@ -33,14 +33,14 @@
                 <div class="flex flex-wrap gap-1.5 items-center">
                     @foreach (var selectedOption in SelectedOptions)
                     {
-                        <span class="inline-flex items-center gap-x-1 rounded-md @(IsDisabled ? "bg-gray-100 text-gray-500 ring-gray-300/50" : "bg-accent-50 text-accent-700 ring-accent-700/10") px-2 py-1 text-xs font-medium ring-1 ring-inset flex-shrink-0">
+                        <span class="inline-flex items-center gap-x-1 rounded-md @(IsDisabled ? "bg-gray-100 text-gray-500 ring-gray-300/50" : "bg-indigo-50 text-indigo-700 ring-indigo-700/10") px-2 py-1 text-xs font-medium ring-1 ring-inset flex-shrink-0">
                             @selectedOption.Value
                             <button type="button"
                                     disabled="@IsDisabled"
                                     @onclick="() => RemoveOption(selectedOption)"
-                                    class="group relative -mr-1 h-3.5 w-3.5 rounded-sm @(IsDisabled ? "cursor-not-allowed" : "hover:bg-accent-600/20")">
+                                    class="group relative -mr-1 h-3.5 w-3.5 rounded-sm @(IsDisabled ? "cursor-not-allowed" : "hover:bg-indigo-600/20")">
                                 <span class="sr-only">Remove</span>
-                                <svg viewBox="0 0 14 14" class="h-3.5 w-3.5 @(IsDisabled ? "stroke-gray-400" : "stroke-accent-700/50 group-hover:stroke-accent-700/75")">
+                                <svg viewBox="0 0 14 14" class="h-3.5 w-3.5 @(IsDisabled ? "stroke-gray-400" : "stroke-indigo-700/50 group-hover:stroke-indigo-700/75")">
                                     <path d="m4 4 6 6m0-6-6 6" />
                                 </svg>
                             </button>
@@ -96,14 +96,14 @@
                     @foreach (var option in FilteredOptions)
                     {
                         var isSelected = SelectedOptions?.Any(s => s.Id == option.Id) ?? false;
-                        <li class="relative cursor-pointer py-2 pr-4 pl-8 text-gray-900 hover:bg-gray-100 @(isSelected ? "bg-accent-50" : "")"
+                        <li class="relative cursor-pointer py-2 pr-4 pl-8 text-gray-900 hover:bg-gray-100 @(isSelected ? "bg-indigo-50" : "")"
                             role="option"
                             @onclick="() => ToggleOption(option)"
                             @onmousedown:preventDefault="true">
-                            <span class="block truncate @(isSelected ? "text-accent-600 font-medium" : "font-normal")">@option.Value</span>
+                            <span class="block truncate @(isSelected ? "text-indigo-600 font-medium" : "font-normal")">@option.Value</span>
                             @if (isSelected)
                             {
-                                <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-indigo-600">
                                     <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                         <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"></path>
                                     </svg>
@@ -210,7 +210,7 @@
         if (isInvalid)
             return "bg-white outline-red-500 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-red-500";
 
-        return "bg-white outline-gray-300 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-accent-600";
+        return "bg-white outline-gray-300 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-indigo-600";
     }
 
     private (bool IsValid, string Label) Validate()

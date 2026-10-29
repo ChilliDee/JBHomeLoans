@@ -16,7 +16,7 @@ public partial class VerticalSplitter : ComponentBase, IAsyncDisposable
     [Parameter] public double MaxPct { get; set; } = 90;
 
     [Parameter] public int SplitterHeightPx { get; set; } = 8;
-    [Parameter] public string SplitterClass { get; set; } = "bg-gray-200 hover:bg-accent-600 transition-colors";
+    [Parameter] public string SplitterClass { get; set; } = "bg-gray-200 hover:bg-blue-600 transition-colors";
 
     // Fires once, when the user releases the handle — not on every drag frame. JS owns the live visual
     // during the drag itself (direct style writes), so this only needs to sync final state back to .NET.

@@ -28,7 +28,7 @@
         <div class="flex items-center gap-4">
             <label class="flex items-center gap-2">
                 <input type="checkbox"
-                       class="w-4 h-4 text-accent-600 border-gray-300 rounded focus:ring-accent-500"
+                       class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                        @bind="UseCutoffTime"
                        @bind:after="OnCutoffToggleChanged" />
                 <span class="text-sm font-medium text-gray-700">Enable Daily Cutoff Time</span>
@@ -39,7 +39,7 @@
                 <div class="flex items-center gap-2">
                     <label class="text-sm text-gray-600">Cutoff Time:</label>
                     <input type="time"
-                           class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
+                           class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                            value="@CutoffTimeInput"
                            @onchange="@((ChangeEventArgs e) => OnCutoffTimeChanged(e.Value?.ToString()))" />
                     <button type="button"
@@ -55,16 +55,16 @@
     <!-- Statistics Cards -->
     <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
         <div class="grid grid-cols-5 gap-4">
-            <div class="bg-accent-50 p-4 rounded-lg border border-accent-200">
-                <h3 class="text-sm font-medium text-accent-800">Total Records</h3>
-                <p class="text-2xl font-bold text-accent-900">@TotalCount.ToString("N0")</p>
+            <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                <h3 class="text-sm font-medium text-blue-800">Total Records</h3>
+                <p class="text-2xl font-bold text-blue-900">@TotalCount.ToString("N0")</p>
                 @if (NullCount > 0)
                 {
-                    <p class="text-xs text-accent-600 mt-1">@NullCount null values excluded</p>
+                    <p class="text-xs text-blue-600 mt-1">@NullCount null values excluded</p>
                 }
                 @if (ExcludedByCutoffCount > 0)
                 {
-                    <p class="text-xs text-accent-600 mt-1">@ExcludedByCutoffCount excluded by cutoff time</p>
+                    <p class="text-xs text-blue-600 mt-1">@ExcludedByCutoffCount excluded by cutoff time</p>
                 }
                 @if (TotalInputCount != TotalCount)
                 {
@@ -226,9 +226,9 @@
                 @foreach (var dayData in GetDayOfWeekBreakdown())
                 {
                     var isWeekend = dayData.DayOfWeek == DayOfWeek.Saturday || dayData.DayOfWeek == DayOfWeek.Sunday;
-                    var bgColor = isWeekend ? "bg-accent-50" : "bg-gray-50";
-                    var borderColor = isWeekend ? "border-accent-200" : "border-gray-200";
-                    var textColor = isWeekend ? "text-accent-600" : "text-gray-600";
+                    var bgColor = isWeekend ? "bg-blue-50" : "bg-gray-50";
+                    var borderColor = isWeekend ? "border-blue-200" : "border-gray-200";
+                    var textColor = isWeekend ? "text-blue-600" : "text-gray-600";
 
                     <div class="text-center p-3 @bgColor rounded-lg border @borderColor">
                         <h4 class="text-xs font-medium @textColor mb-1">@dayData.DayName</h4>
@@ -343,7 +343,7 @@
     {
         var baseClass = "px-4 py-2 text-sm font-medium transition-colors";
         return period == _currentTimePeriod
-            ? $"{baseClass} bg-accent-600 text-white"
+            ? $"{baseClass} bg-blue-600 text-white"
             : $"{baseClass} bg-white text-gray-700 hover:bg-gray-50";
     }
 

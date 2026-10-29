@@ -1,0 +1,71 @@
+@page "/guide"
+@using FE.Components.Domains.Pages.Guide.Request.A
+@using FE.Components.Domains.Pages.Guide.Inputs.A
+@using FE.Components.Domains.Pages.Guide.StateSub.A
+@using FE.Components.Domains.Pages.Guide.State.A
+@using FE.Components.Domains.Pages.Guide.Navigation.A
+@using FE.Components.Domains.Pages.Guide.Action.A
+@using FE.Components.Domains.Pages.Guide.Switch.A
+@using FE.Components.Domains.Pages.Guide.RcSuccess.A
+@using FE.Components.Domains.Pages.Guide.RcFailure.A
+@using FE.Components.Domains.Pages.Guide.RcRetry.A
+@using FE.Components.Domains.Pages.Guide.CounterA.A
+@using FE.Components.Domains.Pages.Guide.CounterB.A
+
+<PageTitle>Sandbox · Component guide</PageTitle>
+
+<div id="@_d.I.ClassName" class="mx-auto max-w-6xl p-8">
+    @if (_d.I.InitialisationCompleted == false || _d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestIsLoading)
+    {
+        <div class="h-40 animate-pulse rounded-lg bg-gray-100"></div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasFailed)
+    {
+        <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">@_d.RC_Internal.Initialise_HD_.ResponseData.ErrorMessage</div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasCompleted)
+    {
+        <header>
+            <h1 class="text-2xl font-semibold text-gray-900">Component guide</h1>
+            <p class="mt-1 max-w-3xl text-sm text-gray-500">Every card below is a real component. The first section shows one <span class="font-mono text-gray-700">_C</span> inner class per card, the second shows how an <span class="font-mono text-gray-700">_RC</span> request behaves when it succeeds and when it fails, and the third shows one <span class="font-mono text-gray-700">_S</span> state shared by two components.</p>
+            <nav aria-label="Sections" class="mt-4 flex flex-wrap gap-2 text-sm">
+                <a href="/guide#c-classes" class="rounded-full bg-white px-3 py-1 font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50">_C inner classes</a>
+                <a href="/guide#rc-requests" class="rounded-full bg-white px-3 py-1 font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50">_RC requests</a>
+                <a href="/guide#s-state" class="rounded-full bg-white px-3 py-1 font-medium text-gray-700 ring-1 ring-inset ring-gray-300 hover:bg-gray-50">_S state</a>
+            </nav>
+        </header>
+
+        <section id="c-classes" class="mt-10">
+            <h2 class="text-lg font-semibold text-gray-900">The <span class="font-mono">_C</span> inner classes</h2>
+            <p class="mt-1 text-sm text-gray-500">The component only wires things up. Each job lives in its own inner class.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+                <Guide_Request_C />
+                <Guide_Inputs_C />
+                <Guide_StateSub_C />
+                <Guide_State_C />
+                <Guide_Navigation_C />
+                <Guide_Action_C />
+                <Guide_Switch_C />
+            </div>
+        </section>
+
+        <section id="rc-requests" class="mt-12">
+            <h2 class="text-lg font-semibold text-gray-900">The <span class="font-mono">_RC</span> request classes</h2>
+            <p class="mt-1 text-sm text-gray-500">A request reports loading, success or failure. If the RC throws, it catches the error and the razor shows the failed state.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-3">
+                <Guide_RcSuccess_C />
+                <Guide_RcFailure_C />
+                <Guide_RcRetry_C />
+            </div>
+        </section>
+
+        <section id="s-state" class="mt-12 mb-8">
+            <h2 class="text-lg font-semibold text-gray-900">The <span class="font-mono">_S</span> state class</h2>
+            <p class="mt-1 text-sm text-gray-500">Both cards use the page's <span class="font-mono">Guide_P_S</span>. Change it in one and the other updates.</p>
+            <div class="mt-4 grid gap-4 md:grid-cols-2">
+                <Guide_CounterA_C />
+                <Guide_CounterB_C />
+            </div>
+        </section>
+    }
+</div>

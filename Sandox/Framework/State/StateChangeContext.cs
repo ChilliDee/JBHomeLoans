@@ -1,24 +1,37 @@
-namespace Mortgage.State;
-
-// Local Sandox version of the CRM framework class of the same name (no BusinessLogic.Core package).
-// Passed to every ObservableProperty subscriber: says which state change triggered the callback.
-public class StateChangeContext
+namespace Mortgage.State
 {
-    private readonly string _className;
-
-    public StateChangeContext(string className)
+    public class StateChangeContext
     {
-        _className = className;
-    }
+        private string _className;
+        public List<string> CallHierarchy { get; private set; } = new();
 
-    public List<string> CallHierarchy { get; private set; } = new();
 
-    public string GetHierarchyString => string.Join(" -> ", CallHierarchy);
+        public StateChangeContext(string className)
+        {
+            _className = className;
+        }
 
-    public int Depth => CallHierarchy.Count;
+        //public StateChangeContext(string rootComponent)
+        //{
+        //    RootTrigger = rootComponent;
+        //    InitiatedAt = DateTime.UtcNow;
+        //    CallHierarchy.Add(rootComponent);
+        //}
 
-    public void AddToChain(string propertyName)
-    {
-        CallHierarchy.Add($"{_className}.{propertyName}");
+        //private StateChangeContext(string rootTrigger, DateTime initiatedAt, Guid changeId)
+        //{
+        //    RootTrigger = rootTrigger;
+        //    InitiatedAt = initiatedAt;
+        //    ChangeId = changeId;
+        //}
+
+        public void AddToChain(string propertyName)
+        {
+            var componentNameWithProperty = $"{_className}.{propertyName}";  
+            CallHierarchy.Add(componentNameWithProperty);
+        }
+
+        public string GetHierarchyString { get => string.Join(" → ", CallHierarchy); }
+        public int Depth => CallHierarchy.Count;
     }
 }

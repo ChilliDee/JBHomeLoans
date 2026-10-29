@@ -1,0 +1,74 @@
+@page "/jbhl/{Section?}"
+@using FE.Components.Domains.Pages.Jbhl.Header.A
+@using FE.Components.Domains.Pages.Jbhl.Footer.A
+@using FE.Components.Domains.Pages.Jbhl.Home.A
+@using FE.Components.Domains.Pages.Jbhl.Refinance.A
+@using FE.Components.Domains.Pages.Jbhl.BuyAHome.A
+@using FE.Components.Domains.Pages.Jbhl.InvestmentProperty.A
+@using FE.Components.Domains.Pages.Jbhl.SecondMortgages.A
+@using FE.Components.Domains.Pages.Jbhl.PropertyDebtConsolidation.A
+@using FE.Components.Domains.Pages.Jbhl.About.A
+@using FE.Components.Domains.Pages.Jbhl.Contact.A
+
+<HeadContent>
+    <link rel="stylesheet" href="/jbhl/css/jbhl-ua.css" />
+    <link rel="stylesheet" href="/jbhl/css/jbhl.css" />
+    <meta name="robots" content="noindex,nofollow" />
+    <meta name="description" content="@_act.PageDescription(_nav.CurrentSection())" />
+</HeadContent>
+
+<PageTitle>@_act.PageTitle(_nav.CurrentSection())</PageTitle>
+
+<div id="@_d.I.ClassName" class="jbhl-site" @onclick="() => _state.NotifyPageClick()">
+    @{
+        var section = _nav.CurrentSection();
+    }
+
+    <Jbhl_Header_C />
+
+    @if (section == "")
+    {
+        <Jbhl_Home_C />
+    }
+    else if (section == "refinance")
+    {
+        <Jbhl_Refinance_C />
+    }
+    else if (section == "buy-a-home")
+    {
+        <Jbhl_BuyAHome_C />
+    }
+    else if (section == "investment-property")
+    {
+        <Jbhl_InvestmentProperty_C />
+    }
+    else if (section == "second-mortgages")
+    {
+        <Jbhl_SecondMortgages_C />
+    }
+    else if (section == "property-debt-consolidation")
+    {
+        <Jbhl_PropertyDebtConsolidation_C />
+    }
+    else if (section == "about")
+    {
+        <Jbhl_About_C />
+    }
+    else if (section == "contact")
+    {
+        <Jbhl_Contact_C />
+    }
+    else
+    {
+        <main id="main">
+            <section class="section">
+                <div class="wrap">
+                    <h1>Page not found</h1>
+                    <p>We could not find that page. <a href="/jbhl">Go to the home page</a>.</p>
+                </div>
+            </section>
+        </main>
+    }
+
+    <Jbhl_Footer_C />
+</div>

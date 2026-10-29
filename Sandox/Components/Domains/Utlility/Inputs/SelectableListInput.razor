@@ -31,7 +31,7 @@
                     <span class="text-sm font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">@item.Description</span>
                     @if (_selectedIndex == index)
                     {
-                        <svg class="w-4 h-4 text-accent-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                        <svg class="w-4 h-4 text-indigo-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     }
@@ -150,11 +150,11 @@
 
         if (IsDisabled)
             return selected
-                ? $"{baseClasses} border-accent-200 bg-accent-50 cursor-not-allowed opacity-60"
+                ? $"{baseClasses} border-indigo-200 bg-indigo-50 cursor-not-allowed opacity-60"
                 : $"{baseClasses} border-gray-200 bg-gray-50 cursor-not-allowed opacity-60";
 
         return selected
-            ? $"{baseClasses} border-accent-400 bg-accent-50 cursor-pointer"
+            ? $"{baseClasses} border-indigo-400 bg-indigo-50 cursor-pointer"
             : $"{baseClasses} border-gray-200 hover:bg-gray-50 cursor-pointer";
     }
 

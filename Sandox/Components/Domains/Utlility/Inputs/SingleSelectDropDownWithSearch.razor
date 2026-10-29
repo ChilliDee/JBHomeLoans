@@ -318,7 +318,7 @@
         if (isInvalid)
             return $"{baseClasses} bg-white outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-600";
 
-        return $"{baseClasses} bg-white outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+        return $"{baseClasses} bg-white outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-indigo-600";
     }
 }
 
@@ -373,11 +373,11 @@
 
             if (items.length) {
                 items.forEach((o, i) => {
-                    const hl = i === inst.highlighted ? 'bg-accent-100' : '';
+                    const hl = i === inst.highlighted ? 'bg-blue-100' : '';
                     const sel = isSelected(inst, o);
                     html += '<li data-role="option" data-index="' + i + '" class="relative cursor-default py-2 pr-4 pl-8 text-gray-900 select-none cursor-pointer hover:bg-gray-300 ' + hl + '">'
                         + '<span class="block truncate font-normal">' + esc(o.value) + '</span>'
-                        + (sel ? '<span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">' + svgCheck + '</span>' : '')
+                        + (sel ? '<span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-indigo-600">' + svgCheck + '</span>' : '')
                         + '</li>';
                 });
             } else if (inst.searchText) {

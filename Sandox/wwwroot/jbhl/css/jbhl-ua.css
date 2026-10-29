@@ -1,0 +1,3 @@
+/* Restores browser default styling inside the Jbhl pages so the shared app CSS (Tailwind preflight)
+   cannot change how jbhl.css renders. Zero specificity, loaded before jbhl.css. */
+:where(.jbhl-site, .jbhl-site *) { all: revert; }

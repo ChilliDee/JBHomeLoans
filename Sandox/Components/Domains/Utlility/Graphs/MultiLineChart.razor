@@ -17,9 +17,9 @@
     <!-- Stats Cards -->
     <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
         <div class="grid grid-cols-4 gap-4">
-            <div class="bg-accent-50 p-4 rounded-lg border border-accent-200">
-                <h3 class="text-sm font-medium text-accent-800">Total Records</h3>
-                <p class="text-2xl font-bold text-accent-900">@TotalCount.ToString("N0")</p>
+            <div class="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                <h3 class="text-sm font-medium text-blue-800">Total Records</h3>
+                <p class="text-2xl font-bold text-blue-900">@TotalCount.ToString("N0")</p>
             </div>
             <div class="bg-green-50 p-4 rounded-lg border border-green-200">
                 <h3 class="text-sm font-medium text-green-800">Keys / Series</h3>
@@ -373,7 +373,7 @@
     {
         var baseClass = "px-4 py-2 text-sm font-medium transition-colors";
         return period == _currentTimePeriod
-            ? $"{baseClass} bg-accent-600 text-white"
+            ? $"{baseClass} bg-blue-600 text-white"
             : $"{baseClass} bg-white text-gray-700 hover:bg-gray-50";
     }
 

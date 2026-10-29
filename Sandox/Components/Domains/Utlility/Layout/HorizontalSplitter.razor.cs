@@ -13,7 +13,7 @@ public partial class HorizontalSplitter : ComponentBase, IAsyncDisposable
     [Parameter] public double MinPct { get; set; } = 20;
     [Parameter] public double MaxPct { get; set; } = 80;
     [Parameter] public int SplitterWidthPx { get; set; } = 10;
-    [Parameter] public string SplitterClass { get; set; } = "bg-gray-200 hover:bg-accent-400 transition-colors";
+    [Parameter] public string SplitterClass { get; set; } = "bg-gray-200 hover:bg-indigo-400 transition-colors";
 
     // Controlled mode (if you're using it)
     [Parameter] public double? LeftPct { get; set; }

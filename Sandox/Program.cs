@@ -1,4 +1,4 @@
-using Mortgage.Interceptors.ErrorHandling.Factory;
+using FE.Framework.Extensions;
 using FE.Components;
 
 var builder = WebApplication.CreateBuilder(args);
