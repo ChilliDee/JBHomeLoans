@@ -1,0 +1,75 @@
+# Builds the Sandox Blazor Server app and deploys it to the jbhomeloans-demo App Service.
+# Runs on every push to main, or manually from the Actions tab.
+# Signs in to Azure with OIDC (no stored passwords): the managed identity oidc-msi-b597
+# trusts this repo's main branch through a federated credential.
+
+name: Deploy jbhomeloans-demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AZURE_WEBAPP_NAME: jbhomeloans-demo
+  PROJECT_PATH: Sandox/Sandox.csproj
+  DOTNET_VERSION: '8.0.x'
+  NODE_VERSION: '22'
+  # Not secrets: IDs of the oidc-msi-b597 identity, the tenant and the subscription.
+  AZURE_CLIENT_ID: 79032900-38a3-45b1-9698-85ea025e4c5e
+  AZURE_TENANT_ID: cc63b341-6a11-4d20-9fb0-259981d4adfd
+  AZURE_SUBSCRIPTION_ID: 9a805e72-4bdc-4e87-a6e6-3e1a94b470a4
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Build Tailwind CSS
+        working-directory: Sandox
+        run: |
+          npm ci
+          npm run build:css
+
+      - name: Publish
+        run: dotnet publish ${{ env.PROJECT_PATH }} -c Release -o ${{ github.workspace }}/publish
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app
+          path: ${{ github.workspace }}/publish
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # No "environment:" here on purpose: it would change the OIDC subject
+    # and stop it matching the federated credential for refs/heads/main.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: app
+          path: app
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: app
