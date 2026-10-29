@@ -1,0 +1,150 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@if (Scrollable)
+{
+    @* Natural-flow mode: no wrapper, no height — the nearest scrollable
+       ancestor (the Files viewer body) owns scrolling. *@
+       <div class="image-viewer relative" style="height: 1px;">
+            <div class="sticky top-2 flex justify-end gap-1 pr-2 z-10">
+                @_rotateControls
+            </div>
+            <img src="@_src" alt="@AltText" class="h-auto w-full"
+                 style="display:block; transform:rotate(@(_rotationDegrees)deg); transition:transform 0.2s ease;"/>
+       </div>
+}
+else
+{
+    <div class="relative" style="width:@EffectiveWidth; height:@EffectiveHeight; display:flex; align-items:center; justify-content:center; overflow:hidden;">
+        <img src="@_src" alt="@AltText" class="image-viewer"
+             style="width:@Width; height:@Height; object-fit:contain; display:block; transform:rotate(@(_rotationDegrees)deg); transition:transform 0.2s ease;" />
+        <div class="absolute top-2 right-2 z-10 flex gap-1">
+            @_rotateControls
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public byte[] FileBytes { get; set; }
+    [Parameter] public string FileName { get; set; }
+    [Parameter] public string Width { get; set; } = "100%";
+    [Parameter] public string Height { get; set; } = "600px";
+    [Parameter] public string AltText { get; set; } = "";
+
+    /// <summary>When true, the image renders at natural size inside a scrollable container.</summary>
+    [Parameter] public bool Scrollable { get; set; } = false;
+
+    /// <summary>Scrollable mode only: fit the image to the container width and scroll vertically.
+    /// Set false to allow horizontal panning at full natural size.</summary>
+    [Parameter] public bool FitWidth { get; set; } = true;
+
+    private string _src;
+    private string _previousBlobUrl;
+    private bool _jsInitialised;
+    private byte[] _loadedBytes;
+    // Kept unbounded (not wrapped to 0-360) so the CSS transition always animates
+    // forward/backward in the direction clicked instead of snapping back through
+    // a reverse 270°+ spin when it would otherwise wrap past 0/360.
+    private int _rotationDegrees;
+
+    private int NormalisedRotation => ((_rotationDegrees % 360) + 360) % 360;
+
+    private string EffectiveWidth => NormalisedRotation is 90 or 270 ? Height : Width;
+    private string EffectiveHeight => NormalisedRotation is 90 or 270 ? Width : Height;
+
+    private void RotateLeft() => _rotationDegrees -= 90;
+    private void RotateRight() => _rotationDegrees += 90;
+
+    private RenderFragment _rotateControls => __builder =>
+    {
+        <button type="button" title="Rotate left"
+                class="flex items-center justify-center w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors cursor-pointer"
+                @onclick="RotateLeft">
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+            </svg>
+        </button>
+        <button type="button" title="Rotate right"
+                class="flex items-center justify-center w-7 h-7 rounded-full bg-black/50 hover:bg-black/70 text-white transition-colors cursor-pointer"
+                @onclick="RotateRight">
+            <svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 15l6-6m0 0l-6-6m6 6H9a6 6 0 000 12h3" />
+            </svg>
+        </button>
+    };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_jsInitialised)
+        {
+            await JS.InvokeVoidAsync("eval",
+                "window._imageViewer = {" +
+                "  createBlobUrl: function(bytes, mimeType) {" +
+                "    var blob = new Blob([new Uint8Array(bytes)], { type: mimeType });" +
+                "    return URL.createObjectURL(blob);" +
+                "  }," +
+                "  revokeBlobUrl: function(url) { if (url) URL.revokeObjectURL(url); }" +
+                "};");
+            _jsInitialised = true;
+
+            if (FileBytes is { Length: > 0 } && !ReferenceEquals(FileBytes, _loadedBytes))
+            {
+                await LoadImageAsync();
+                StateHasChanged();
+            }
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_jsInitialised && FileBytes is { Length: > 0 } && !ReferenceEquals(FileBytes, _loadedBytes))
+        {
+            await LoadImageAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadImageAsync()
+    {
+        await RevokePreviousBlobUrlAsync();
+        var mimeType = GetMimeType();
+        _src = await JS.InvokeAsync<string>("_imageViewer.createBlobUrl", FileBytes, mimeType);
+        _previousBlobUrl = _src;
+        _loadedBytes = FileBytes;
+        _rotationDegrees = 0;
+    }
+
+    private string GetMimeType()
+    {
+        var ext = System.IO.Path.GetExtension(FileName)?.ToLowerInvariant() ?? "";
+        return ext switch
+        {
+            ".jpg" => "image/jpeg",
+            ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "image/jpeg"
+        };
+    }
+
+    private async Task RevokePreviousBlobUrlAsync()
+    {
+        if (!string.IsNullOrEmpty(_previousBlobUrl))
+        {
+            await JS.InvokeVoidAsync("_imageViewer.revokeBlobUrl", _previousBlobUrl);
+            _previousBlobUrl = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await RevokePreviousBlobUrlAsync();
+        }
+        catch (JSDisconnectedException) { /* circuit already gone */ }
+    }
+}

@@ -1,0 +1,375 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<div class="relative flex-1 min-h-0 flex flex-col" style="@(MinHeight != null ? $"min-height: {MinHeight};" : "")">
+    <div class="absolute top-3 right-5 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-green-400 shadow-sm transition-all duration-500 ease-in-out @(SavedSuccessfully ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none")" title="Saved">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="white" class="h-3.5 w-3.5">
+            <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clip-rule="evenodd" />
+        </svg>
+    </div>
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+        @Label
+    </label>
+    <textarea name="@Name"
+              id="@Id"
+              value="@DisplayValue"
+              @onchange="HandleChange"
+              @onkeydown="HandleKeyDown"
+              @onblur="HandleBlur"
+              @ref="textareaRef"
+              rows="@Rows"
+              placeholder="@Placeholder"
+              maxlength="@(MaxLength > 0 ? MaxLength : null)"
+              disabled="@IsDisabled"
+              spellcheck="@(SpellCheck ? "true" : "false")"
+              class="block w-full rounded-md px-3 py-1.5 text-base outline-1 -outline-offset-1 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 sm:text-sm/6 resize-y @GetTextareaClasses() h-full flex-1"></textarea>
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    public enum KeyModifier
+    {
+        None,
+        Ctrl,
+        Shift,
+        Alt,
+        Meta
+    }
+
+    private ElementReference textareaRef;
+    private string componentId = Guid.NewGuid().ToString("N")[..8];
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+    private CancellationTokenSource? savedSuccessfullyCts;
+    private int? _pendingCursorPosition;
+
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action<string?>? OnChange { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = string.Empty;
+    [Parameter] public int Rows { get; set; } = 3;
+    [Parameter] public int MaxLength { get; set; } = 0;
+    [Parameter] public string? MinHeight { get; set; } = null;
+    [Parameter] public bool ShowCharacterCount { get; set; } = false;
+    [Parameter] public bool AutoFocus { get; set; } = false;
+    [Parameter] public EventCallback<KeyboardEventArgs> OnKeyDown { get; set; }
+    [Parameter] public EventCallback<FocusEventArgs> OnBlur { get; set; }
+    [Parameter] public bool SpellCheck { get; set; } = true;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool NormalizeSpacing { get; set; } = false;
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    // Parameters for key combination handling
+    [Parameter] public KeyModifier Modifier { get; set; } = KeyModifier.None;
+    [Parameter] public string? KeyPair { get; set; }
+    [Parameter] public Func<Task<string?>>? KeyHandler { get; set; }
+
+    // Shows a green checkmark badge in the top-right corner when true.
+    // Automatically flips back to false after 3 seconds and notifies the caller via SavedSuccessfullyChanged.
+    // Every time this arrives as true (even repeatedly, e.g. consecutive saves), the 3-second countdown restarts,
+    // so the badge stays visible/extends rather than being cut short by an earlier in-flight timer.
+    [Parameter] public bool SavedSuccessfully { get; set; }
+    [Parameter] public EventCallback<bool> SavedSuccessfullyChanged { get; set; }
+
+    private string? DisplayValue => NormalizeSpacing ? NormalizeNoteSpacing(Value) : Value;
+
+    // Matches the note-entry signature used across the app: "<initials> dd/MM/yyyy h:mm:ss am/pm - "
+    // e.g. "TJA 27/07/2026 10:11:04 am - ", "MM Core 24/07/2026 10:09:48 AM - [AUTO] ..."
+    private const string NoteEntrySignature = @"\S+(?:\s\S+){0,2}\s+\d{1,2}/\d{1,2}/\d{4}\s+\d{1,2}:\d{2}:\d{2}\s*(?:[AaPp][Mm])\s*-";
+
+    // A real entry separator is either 2+ plain spaces/tabs, or any run containing an actual \r or \n.
+    // A single plain space never qualifies, so multi-word initials (e.g. "MM Core") aren't split apart
+    // just because the second word plus a following date also happens to match NoteEntrySignature.
+    private const string EntrySeparator = @"(?:[ \t]{2,}|[ \t]*[\r\n][ \t\r\n]*)";
+
+    private static string? NormalizeNoteSpacing(string? notes)
+    {
+        if (string.IsNullOrEmpty(notes)) return notes;
+
+        var normalized = notes.Trim();
+
+        // Whatever separates two entries (spaces, tabs, clean \n\n, or corrupted runs of stray \r's
+        // like "\r\r\n\r\r\n") gets replaced wholesale with a trailing space plus exactly one blank
+        // line, as long as it's immediately followed by a recognizable note-entry signature. The space
+        // keeps "- " intact at the end of the preceding entry, matching the "- " that precedes an
+        // entry's own text.
+        normalized = System.Text.RegularExpressions.Regex.Replace(
+            normalized,
+            $@"{EntrySeparator}(?={NoteEntrySignature})",
+            " \n\n");
+
+        return normalized;
+    }
+
+    private bool IsDisabled => Disabled;
+
+    private string GetTextareaClasses()
+    {
+        if (IsDisabled)
+            return "bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (isInvalid)
+            return "bg-white text-gray-900 outline-red-500 focus:outline-red-500";
+
+        return "bg-white text-gray-900 outline-gray-300 focus:outline-accent-600";
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && string.IsNullOrWhiteSpace(Value))
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    protected override void OnInitialized()
+    {
+
+        ValidationRef?.Invoke(Validate);
+
+        base.OnInitialized();
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (SavedSuccessfully)
+        {
+            StartSavedSuccessfullyResetTimer();
+        }
+        else
+        {
+            // Caller (or our own reset) explicitly cleared it — cancel any pending reset so it doesn't
+            // fire later and stomp on a subsequent true signal.
+            savedSuccessfullyCts?.Cancel();
+        }
+
+        base.OnParametersSet();
+    }
+
+    private void StartSavedSuccessfullyResetTimer()
+    {
+        savedSuccessfullyCts?.Cancel();
+        savedSuccessfullyCts?.Dispose();
+        savedSuccessfullyCts = new CancellationTokenSource();
+
+        _ = ResetSavedSuccessfullyAfterDelayAsync(savedSuccessfullyCts.Token);
+    }
+
+    private async Task ResetSavedSuccessfullyAfterDelayAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(3000, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested) return;
+
+        await InvokeAsync(async () =>
+        {
+            SavedSuccessfully = false;
+            await SavedSuccessfullyChanged.InvokeAsync(false);
+            StateHasChanged();
+        });
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        var newValue = e.Value?.ToString();
+        Value = newValue;
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        await ValueChanged.InvokeAsync(newValue);
+        OnChange?.Invoke(newValue);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        await OnKeyDown.InvokeAsync(e);
+
+        if (ShouldHandleKeyCombination(e) && KeyHandler != null)
+        {
+            var textToInsert = await KeyHandler();
+
+            if (!string.IsNullOrEmpty(textToInsert))
+            {
+                await InsertTextAtCursor(textToInsert);
+            }
+        }
+    }
+
+    private async Task HandleBlur(FocusEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        await OnBlur.InvokeAsync(e);
+    }
+
+    private bool ShouldHandleKeyCombination(KeyboardEventArgs e)
+    {
+        if (Modifier == KeyModifier.None || string.IsNullOrEmpty(KeyPair))
+            return false;
+
+        var modifierMatches = Modifier switch
+        {
+            KeyModifier.Ctrl => e.CtrlKey,
+            KeyModifier.Shift => e.ShiftKey,
+            KeyModifier.Alt => e.AltKey,
+            KeyModifier.Meta => e.MetaKey,
+            KeyModifier.None => false,
+            _ => false
+        };
+
+        var keyMatches = string.Equals(e.Key, KeyPair, StringComparison.OrdinalIgnoreCase);
+
+        return modifierMatches && keyMatches;
+    }
+
+    public async Task InsertTextAtCursor(string text)
+    {
+        if (string.IsNullOrEmpty(text) || IsDisabled) return;
+
+        try
+        {
+            var position = await JSRuntime.InvokeAsync<int>($"getTextareaCursorPosition_{componentId}", textareaRef);
+            var currentDomValue = await JSRuntime.InvokeAsync<string>($"getTextareaValue_{componentId}", textareaRef);
+
+            var before = (currentDomValue ?? string.Empty).Substring(0, position);
+            var after = (currentDomValue ?? string.Empty).Substring(position);
+
+            // Whatever was directly after the cursor gets pushed onto its own line, separated from the
+            // new entry by exactly one blank line — the same spacing used between existing entries —
+            // instead of being glued straight onto the end of the inserted text.
+            var trimmedAfter = after.TrimStart(' ', '\t', '\r', '\n');
+            var newValue = before + text + (trimmedAfter.Length > 0 ? "\n\n" + trimmedAfter : after);
+
+            // DisplayValue recomputes NormalizeNoteSpacing(Value) from scratch on every render, so
+            // whatever we push to the DOM here gets overwritten by that same single-pass transform the
+            // moment Blazor re-renders. Mirror it exactly rather than trying to dodge it, so the cursor
+            // position we compute matches what actually lands on screen.
+            var displayValue = NormalizeSpacing ? NormalizeNoteSpacing(newValue) : newValue;
+
+            // NormalizeNoteSpacing collapses whitespace directly before a recognized entry — including
+            // `text`'s own trailing space, when something was pushed down after it — so `text` verbatim
+            // may not survive. Anchor on the trimmed text instead, and step past a trailing space only if
+            // one actually survived (it does when nothing followed to trigger the collapse, e.g. inserting
+            // at the very end of the notes).
+            var anchor = text.TrimEnd();
+            var anchorIndex = (displayValue ?? string.Empty).IndexOf(anchor, StringComparison.Ordinal);
+            int cursorPosition;
+            if (anchorIndex >= 0)
+            {
+                cursorPosition = anchorIndex + anchor.Length;
+                if (displayValue!.Length > cursorPosition && displayValue[cursorPosition] == ' ')
+                    cursorPosition++;
+            }
+            else
+            {
+                cursorPosition = (displayValue ?? string.Empty).Length;
+            }
+
+            await JSRuntime.InvokeVoidAsync($"setTextareaValue_{componentId}", textareaRef, displayValue);
+
+            Value = newValue;
+            await ValueChanged.InvokeAsync(newValue);
+            OnChange?.Invoke(newValue);
+
+            // Applied in OnAfterRenderAsync, after Blazor's own render has finished touching the
+            // textarea's value — setting it here would just get clobbered by that re-render.
+            _pendingCursorPosition = cursorPosition;
+
+            StateHasChanged();
+
+            // Deliberately no AsyncCallBack here: it triggers a debounced save with a real DB round trip,
+            // which delays the follow-up render long enough for fast typing to land before it. That render
+            // then reapplies the stale Value (textarea @onchange only fires on blur) and the pending cursor
+            // position, clobbering/misplacing what the user typed after the timestamp. The regular blur
+            // save still covers persisting the inserted text.
+        }
+        catch (Exception ex)
+        {
+            var fallbackValue = (Value ?? string.Empty) + text;
+            Value = fallbackValue;
+            await ValueChanged.InvokeAsync(fallbackValue);
+            OnChange?.Invoke(fallbackValue);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JSRuntime.InvokeVoidAsync("eval", $@"
+                window.getTextareaCursorPosition_{componentId} = function(element) {{
+                    return element.selectionStart || 0;
+                }};
+
+                window.setTextareaCursorPosition_{componentId} = function(element, position) {{
+                    element.focus();
+                    element.setSelectionRange(position, position);
+                }};
+
+                window.getTextareaValue_{componentId} = function(element) {{
+                    return element.value || '';
+                }};
+
+                window.setTextareaValue_{componentId} = function(element, value) {{
+                    element.value = value;
+                }};
+
+                window.focusElement_{componentId} = function(element) {{
+                    element.focus();
+                }};
+            ");
+
+            if (AutoFocus && !IsDisabled)
+            {
+                await JSRuntime.InvokeVoidAsync($"focusElement_{componentId}", textareaRef);
+            }
+        }
+
+        if (_pendingCursorPosition.HasValue)
+        {
+            var cursorPosition = _pendingCursorPosition.Value;
+            _pendingCursorPosition = null;
+            await JSRuntime.InvokeVoidAsync($"setTextareaCursorPosition_{componentId}", textareaRef, cursorPosition);
+        }
+    }
+
+    public void Dispose()
+    {
+
+        savedSuccessfullyCts?.Cancel();
+        savedSuccessfullyCts?.Dispose();
+    }
+}

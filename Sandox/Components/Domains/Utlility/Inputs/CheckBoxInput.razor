@@ -1,0 +1,267 @@
+﻿@using Microsoft.AspNetCore.Components
+@using System.ComponentModel
+@implements IAsyncDisposable
+
+<div class="relative">
+    @if (!string.IsNullOrWhiteSpace(Label))
+    {
+        if (LabelPlacement == "floating")
+        {
+            <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+                @Label
+            </label>
+        }
+        else
+        {
+            <div class="mb-1">
+                <label for="@Id" class="inline-block text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+                    @Label
+                </label>
+            </div>
+        }
+    }
+
+    <div class="block w-full rounded-md @(IsDisabled ? "bg-gray-50" : "") px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 min-h-[38px] @GetContainerClasses()">
+        <div class="flex items-center gap-3">
+            <!-- Toggle Switch -->
+            <button type="button"
+                    id="@Id"
+                    name="@Name"
+                    disabled="@IsDisabled"
+                    @onclick="ToggleValue"
+                    class="@GetSwitchClasses()"
+                    role="switch"
+                    aria-checked="@GetAriaChecked()">
+                <span class="sr-only">@CheckboxText</span>
+                <span class="@GetToggleClasses()">
+                    <!-- False/Off Icon (X) -->
+                    <span class="@GetOffIconClasses()" aria-hidden="true">
+                        <svg class="size-3 @(IsDisabled ? "text-gray-300" : "text-gray-400")" fill="none" viewBox="0 0 12 12">
+                            <path d="M4 8l2-2m0 0l2-2M6 6L4 4m2 2l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                        </svg>
+                    </span>
+
+                    <!-- True/On Icon (Checkmark) -->
+                    <span class="@GetOnIconClasses()" aria-hidden="true">
+                        <svg class="size-3 @(IsDisabled ? "text-accent-400" : "text-accent-600")" fill="currentColor" viewBox="0 0 12 12">
+                            <path d="M3.707 5.293a1 1 0 00-1.414 1.414l1.414-1.414zM5 8l-.707.707a1 1 0 001.414 0L5 8zm4.707-3.293a1 1 0 00-1.414-1.414l1.414 1.414zm-7.414 2l2 2 1.414-1.414-2-2-1.414 1.414zm3.414 2l4-4-1.414-1.414-4 4 1.414 1.414z"></path>
+                        </svg>
+                    </span>
+                </span>
+            </button>
+
+            <!-- Switch Label Text -->
+            <div class="flex-1">
+                <span class="@GetLabelTextClasses() @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer") select-none" @onclick="ToggleValue">
+                    @CheckboxText
+                </span>
+                @if (!string.IsNullOrEmpty(Description))
+                {
+                    <p class="text-xs @(IsDisabled ? "text-gray-400" : "text-gray-500") mt-0.5">@Description</p>
+                }
+            </div>
+
+            <!-- State Indicator -->
+            @if (ShowStateIndicator)
+            {
+                <div class="text-xs font-medium @GetStateTextClasses()">
+                    @GetStateText()
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    // ── Nullable bool binding ────────────────────────────────────────────
+    [Parameter] public bool? NullBool { get; set; }
+    [Parameter] public EventCallback<bool?> NullBoolChanged { get; set; }
+
+    // ── Non-nullable bool binding ────────────────────────────────────────
+    [Parameter] public bool NonNullBool { get; set; }
+    [Parameter] public EventCallback<bool> NonNullBoolChanged { get; set; }
+
+    // ── Shared parameters ────────────────────────────────────────────────
+    [Parameter] public Action<bool?>? OnChange { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string CheckboxText { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public bool ShowStateIndicator { get; set; } = false;
+    [Parameter] public bool DefaultToFalse { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public string LabelPlacement { get; set; }
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public bool NoBorder { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// When Required is true, the toggle must be switched on to pass validation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    // ── Disposal guards ──────────────────────────────────────────────────
+    private bool _isDisposed;
+    private bool _unsubscribed;
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    // ── True when the caller bound a non-nullable bool ───────────────────
+    private bool IsNonNullableBinding => NonNullBoolChanged.HasDelegate;
+
+    // ── Resolved current value regardless of binding mode ───────────────
+    private bool ResolvedValue
+    {
+        get
+        {
+            if (IsNonNullableBinding)
+                return NonNullBool;
+
+            return NullBool ?? (DefaultToFalse ? false : true);
+        }
+    }
+
+    // ── Combined disabled state ──────────────────────────────────────────
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        ValidationRef?.Invoke(Validate);
+        base.OnInitialized();
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && !ResolvedValue)
+        {
+            isInvalid = true;
+            errorMessage = $"{(string.IsNullOrEmpty(Label) ? CheckboxText : Label)} is required.";
+            StateHasChanged();
+            return (false, string.IsNullOrEmpty(Label) ? CheckboxText : Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, string.IsNullOrEmpty(Label) ? CheckboxText : Label);
+    }
+
+    private void Unsubscribe()
+    {
+        if (_unsubscribed) return;
+        _unsubscribed = true;
+    }
+
+    private async Task ToggleValue()
+    {
+        if (IsDisabled) return;
+
+        bool newValue = !ResolvedValue;
+
+        if (IsNonNullableBinding)
+        {
+            NonNullBool = newValue;
+            await NonNullBoolChanged.InvokeAsync(newValue);
+        }
+        else
+        {
+            NullBool = newValue;
+            await NullBoolChanged.InvokeAsync(newValue);
+            OnChange?.Invoke(newValue);
+        }
+
+        if (newValue)
+        {
+            isInvalid = false;
+            errorMessage = string.Empty;
+        }
+
+        if (AsyncCallBack != null)
+        {
+            Unsubscribe();
+            await AsyncCallBack.Invoke();
+        }
+    }
+
+    private string GetSwitchClasses()
+    {
+        var baseClasses = "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out";
+
+        if (IsDisabled)
+        {
+            baseClasses += " cursor-not-allowed opacity-50";
+            return ResolvedValue ? $"{baseClasses} bg-accent-300" : $"{baseClasses} bg-gray-200";
+        }
+        else
+        {
+            baseClasses += " cursor-pointer focus:ring-2 focus:ring-accent-600 focus:ring-offset-2 focus:outline-hidden";
+            return ResolvedValue ? $"{baseClasses} bg-accent-600" : $"{baseClasses} bg-gray-200";
+        }
+    }
+
+    private string GetToggleClasses()
+    {
+        var baseClasses = "pointer-events-none relative inline-block size-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out";
+        return ResolvedValue ? $"{baseClasses} translate-x-5" : $"{baseClasses} translate-x-0";
+    }
+
+    private string GetOffIconClasses()
+    {
+        var baseClasses = "absolute inset-0 flex size-full items-center justify-center transition-opacity duration-200 ease-in";
+        return ResolvedValue ? $"{baseClasses} opacity-0" : $"{baseClasses} opacity-100";
+    }
+
+    private string GetContainerClasses()
+    {
+        if (NoBorder) 
+            return string.Empty;
+
+        if (IsDisabled)
+            return "outline outline-1 -outline-offset-1 outline-gray-200";
+
+        if (Highlight)
+            return "outline outline-2 -outline-offset-1 outline-amber-500";
+
+        if (isInvalid)
+            return "outline outline-1 -outline-offset-1 outline-red-500";
+
+        return "outline outline-1 -outline-offset-1 outline-gray-300";
+    }
+
+    private string GetOnIconClasses()
+    {
+        var baseClasses = "absolute inset-0 flex size-full items-center justify-center transition-opacity duration-100 ease-out";
+        return ResolvedValue ? $"{baseClasses} opacity-100" : $"{baseClasses} opacity-0";
+    }
+
+    private string GetAriaChecked() => ResolvedValue ? "true" : "false";
+
+    private string GetLabelTextClasses() =>
+        IsDisabled ? "text-sm font-medium text-gray-500" : "text-sm font-medium text-gray-900";
+
+    private string GetStateTextClasses()
+    {
+        if (IsDisabled)
+            return ResolvedValue ? "text-green-400" : "text-gray-400";
+
+        return ResolvedValue ? "text-green-600" : "text-gray-500";
+    }
+
+    private string GetStateText() => ResolvedValue ? "On" : "Off";
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        Unsubscribe();
+    }
+}

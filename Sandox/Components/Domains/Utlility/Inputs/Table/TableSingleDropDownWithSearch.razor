@@ -1,0 +1,539 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@inject IJSRuntime JS
+@implements IDisposable
+
+<div class="relative h-full w-full" @ref="containerRef">
+    <div class="relative w-full h-full">
+        <input type="text"
+               @ref="searchInputRef"
+               @bind="searchTerm"
+               @bind:event="oninput"
+               @onkeydown="HandleKeyDown"
+               @onfocus="HandleFocus"
+               @onfocusout="HandleFocusOut"
+               disabled="@IsDisabled"
+               class="@GetInputClasses()"
+               placeholder="@GetPlaceholderText()"
+               readonly="@(!isSearchMode || IsDisabled)" />
+
+        <button type="button"
+                id="@Id"
+                name="@Name"
+                disabled="@IsDisabled"
+                @onclick="ToggleDropdown"
+                class="absolute inset-0 w-full h-full @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer") bg-transparent border-0 outline-none @(isSearchMode || IsDisabled ? "pointer-events-none" : "")"
+                tabindex="@(isSearchMode || IsDisabled ? -1 : 0)">
+        </button>
+
+        <div class="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none">
+            @if (isSearchMode && !IsDisabled)
+            {
+                <svg class="size-5 @(IsDisabled ? "text-gray-300" : "text-gray-400")" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+                </svg>
+            }
+            else
+            {
+                <svg class="size-5 @(IsDisabled ? "text-gray-300" : "text-gray-400")" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+                </svg>
+            }
+        </div>
+    </div>
+
+    @if (isOpen && !IsDisabled)
+    {
+        <ul class="z-[9999] max-h-[240px] overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black/5 focus:outline-hidden sm:text-sm @(_dropdownVisible ? "opacity-100" : "opacity-0") transition-opacity duration-75"
+            style="@(_dropdownVisible ? "" : "display: none;")"
+            tabindex="-1"
+            role="listbox"
+            aria-labelledby="@Id"
+            @ref="dropdownRef">
+
+            @if (!string.IsNullOrEmpty(searchTerm))
+            {
+                <li class="px-3 py-2 text-xs text-gray-500 border-b border-gray-100">
+                    Search results for "@searchTerm"
+                </li>
+            }
+
+            @if (FilteredOptions?.Any() == true)
+            {
+                @foreach (var option in FilteredOptions)
+                {
+                    <li class="relative cursor-default py-2 pr-4 pl-8 text-gray-900 select-none cursor-pointer hover:bg-gray-100"
+                        role="option"
+                        @onclick="() => SelectOption(option)"
+                        @onmousedown:preventDefault="true">
+                        <span class="block truncate font-normal">
+                            @if (!string.IsNullOrEmpty(searchTerm))
+                            {
+                                @((MarkupString)HighlightSearchTerm(option.Value, searchTerm))
+                            }
+                            else
+                            {
+                                @option.Value
+                            }
+                        </span>
+                        @if (SelectedOption?.Value == option.Value)
+                        {
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">
+                                <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+                                    <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"></path>
+                                </svg>
+                            </span>
+                        }
+                    </li>
+                }
+            }
+            else if (!string.IsNullOrEmpty(searchTerm))
+            {
+                <li class="px-3 py-2 text-gray-500 text-center">
+                    No options found
+                </li>
+            }
+
+            @if (!EnableSearch && Options?.Any() == true)
+            {
+                <li class="border-t border-gray-100 mt-1 pt-1">
+                    <button type="button"
+                            @onclick="EnableSearchMode"
+                            @onmousedown:preventDefault="true"
+                            class="w-full px-3 py-2 text-left text-gray-600 hover:bg-gray-50 flex items-center text-sm">
+                        <svg class="size-4 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
+                        </svg>
+                        Search options...
+                    </button>
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    [Parameter] public TableSingleDropDownWithSearchOption? SelectedOption { get; set; }
+    [Parameter] public IEnumerable<TableSingleDropDownWithSearchOption> Options { get; set; } = null!;
+    [Parameter] public EventCallback<TableSingleDropDownWithSearchOption?> AsyncCallBack { get; set; }
+    [Parameter] public Action<TableSingleDropDownWithSearchOption?>? OnChange { get; set; }
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Select...";
+    [Parameter] public EventCallback<TableSingleDropDownWithSearchOption?> SelectedOptionChanged { get; set; }
+    [Parameter] public bool EnableSearch { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    private bool isOpen = false;
+    private bool isSearchMode = false;
+    private string searchTerm = string.Empty;
+    private ElementReference searchInputRef;
+    private ElementReference containerRef;
+    private ElementReference dropdownRef;
+    private DotNetObjectReference<TableSingleDropDownWithSearch>? dotNetRef;
+    private bool _dropdownAttached = false;
+    private bool _dropdownVisible = false;
+
+    public class TableSingleDropDownWithSearchOption
+    {
+        public TableSingleDropDownWithSearchOption(string? value, int? id = null)
+        {
+            Id = id;
+            Value = value;
+        }
+
+        public int? Id { get; set; }
+        public string Value { get; set; } = string.Empty;
+    }
+
+    private bool IsDisabled => Disabled;
+
+    private IEnumerable<TableSingleDropDownWithSearchOption>? FilteredOptions
+    {
+        get
+        {
+            if (Options == null) return null;
+
+            if (!string.IsNullOrEmpty(searchTerm))
+            {
+                return Options.Where(option =>
+                    option.Value.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return Options;
+        }
+    }
+
+    protected override void OnInitialized()
+    {
+        dotNetRef = DotNetObjectReference.Create(this);
+
+        base.OnInitialized();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        // Attach dropdown to body when open (only if not already attached)
+        if (isOpen && !_dropdownAttached)
+        {
+            try
+            {
+                // Reset visibility when opening
+                _dropdownVisible = false;
+
+                await Task.Delay(50); // Ensure DOM is ready
+
+                await JS.InvokeVoidAsync(
+                    "setupClickOutsideListenerForTable",
+                    containerRef,
+                    dropdownRef,
+                    dotNetRef
+                );
+
+                await JS.InvokeVoidAsync(
+                    "attachTableDropdownToBody",
+                    dropdownRef,
+                    containerRef
+                );
+
+                _dropdownAttached = true;
+
+                // Show dropdown after attachment
+                _dropdownVisible = true;
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error attaching dropdown: {ex.Message}");
+            }
+        }
+        // Detach dropdown from body when closed (only if currently attached)
+        else if (!isOpen && _dropdownAttached)
+        {
+            try
+            {
+                _dropdownVisible = false;
+
+                await JS.InvokeVoidAsync(
+                    "detachTableDropdownFromBody",
+                    dropdownRef,
+                    containerRef
+                );
+
+                await JS.InvokeVoidAsync("removeClickOutsideListenerForTable", containerRef);
+                _dropdownAttached = false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error detaching dropdown: {ex.Message}");
+            }
+        }
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "block w-full h-full px-3 py-1.5 text-base sm:text-sm/6 border-0 outline-none focus:outline-none focus:ring-0 focus:border-0";
+
+        if (IsDisabled)
+        {
+            return $"{baseClasses} bg-gray-50 text-gray-500 cursor-not-allowed";
+        }
+        else
+        {
+            return $"{baseClasses} text-gray-900";
+        }
+    }
+
+    private string GetPlaceholderText()
+    {
+        if (IsDisabled)
+        {
+            return SelectedOption != null ? SelectedOption.Value : Placeholder;
+        }
+
+        if (isSearchMode)
+        {
+            return "Search options...";
+        }
+
+        if (SelectedOption != null)
+        {
+            return SelectedOption.Value;
+        }
+
+        return Placeholder;
+    }
+
+    private async Task SelectOption(TableSingleDropDownWithSearchOption option)
+    {
+        if (IsDisabled) return; // Don't process when disabled
+
+        SelectedOption = option;
+        isOpen = false;
+        isSearchMode = false;
+        searchTerm = string.Empty;
+
+        // Notify parent of the change for two-way binding
+        await SelectedOptionChanged.InvokeAsync(option);
+
+        // Additional callbacks
+        OnChange?.Invoke(option);
+        await AsyncCallBack.InvokeAsync(option);
+    }
+
+    private async Task HandleFocus()
+    {
+        if (IsDisabled) return; // Don't handle focus when disabled
+
+        if (!isOpen)
+        {
+            isOpen = true;
+            StateHasChanged();
+        }
+
+        // Enable search mode when focused
+        if (!isSearchMode)
+        {
+            isSearchMode = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleDropdown()
+    {
+        if (IsDisabled) return; // Don't toggle when disabled
+
+        if (!isSearchMode)
+        {
+            isOpen = !isOpen;
+            if (isOpen)
+            {
+                isSearchMode = true;
+                StateHasChanged();
+                await Task.Delay(10);
+                await searchInputRef.FocusAsync();
+            }
+        }
+    }
+
+    private async Task EnableSearchMode()
+    {
+        if (IsDisabled) return; // Don't enable search when disabled
+
+        isSearchMode = true;
+        searchTerm = string.Empty;
+        StateHasChanged();
+
+        await Task.Delay(10);
+        await searchInputRef.FocusAsync();
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (IsDisabled) return; // Don't handle keys when disabled
+
+        if (e.Key == "Escape")
+        {
+            isOpen = false;
+            isSearchMode = false;
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+        else if (e.Key == "Enter" && FilteredOptions?.Any() == true)
+        {
+            var firstOption = FilteredOptions.First();
+            await SelectOption(firstOption);
+        }
+    }
+
+    private async Task HandleFocusOut(FocusEventArgs e)
+    {
+        if (IsDisabled) return; // Don't handle focus out when disabled
+
+        await Task.Delay(150);
+        isOpen = false;
+        isSearchMode = false;
+        searchTerm = string.Empty;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void CloseFromClickOutside()
+    {
+        if (isOpen && !IsDisabled)
+        {
+            isOpen = false;
+            isSearchMode = false;
+            searchTerm = string.Empty;
+            StateHasChanged();
+        }
+    }
+
+    private string HighlightSearchTerm(string text, string searchTerm)
+    {
+        if (string.IsNullOrEmpty(searchTerm)) return text;
+
+        var index = text.IndexOf(searchTerm, StringComparison.OrdinalIgnoreCase);
+        if (index < 0) return text;
+
+        var before = text.Substring(0, index);
+        var match = text.Substring(index, searchTerm.Length);
+        var after = text.Substring(index + searchTerm.Length);
+
+        return $"{before}<mark class=\"bg-yellow-200 px-0.5 rounded\">{match}</mark>{after}";
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe from PropertyChanged events to prevent memory leaks
+
+        // Clean up click outside listener
+        try
+        {
+            JS.InvokeVoidAsync("removeClickOutsideListenerForTable", containerRef);
+        }
+        catch { }
+
+        // Clean up dropdown attachment
+        try
+        {
+            JS.InvokeVoidAsync("detachTableDropdownFromBody", dropdownRef, containerRef);
+        }
+        catch { }
+
+        dotNetRef?.Dispose();
+    }
+}
+
+<script>
+    window.setupClickOutsideListenerForTable = (containerElement, dropdownElement, dotNetRef) => {
+        if (!containerElement || !dropdownElement) return;
+
+        window.removeClickOutsideListenerForTable(containerElement);
+
+        const clickHandler = (event) => {
+            const clickedInsideContainer = containerElement.contains(event.target);
+            const clickedInsideDropdown = dropdownElement.contains(event.target);
+
+            if (!clickedInsideContainer && !clickedInsideDropdown) {
+                try {
+                    dotNetRef.invokeMethodAsync('CloseFromClickOutside');
+                } catch {
+                    window.removeClickOutsideListenerForTable(containerElement);
+                }
+            }
+        };
+
+        containerElement._clickOutsideHandlerForTable = clickHandler;
+        document.addEventListener('click', clickHandler, true);
+    };
+
+    window.removeClickOutsideListenerForTable = (containerElement) => {
+        if (containerElement && containerElement._clickOutsideHandlerForTable) {
+            document.removeEventListener('click', containerElement._clickOutsideHandlerForTable, true);
+            delete containerElement._clickOutsideHandlerForTable;
+        }
+    };
+
+    window.attachTableDropdownToBody = (dropdownElement, containerElement) => {
+        if (!dropdownElement || !containerElement) return;
+
+        // Function to update position
+            const updatePosition = () => {
+        if (!document.body.contains(containerElement)) {
+            return;
+        }
+
+        const rect = containerElement.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        const margin = 4;
+        const desiredHeight = 240; // matches the ul's max-h-[240px]
+
+        const spaceBelow = viewportHeight - rect.bottom - margin;
+        const spaceAbove = rect.top - margin;
+
+        // Apply positioning inline
+        dropdownElement.style.position = 'fixed';
+        dropdownElement.style.left = `${rect.left}px`;
+        dropdownElement.style.minWidth = `${rect.width}px`;
+        dropdownElement.style.width = 'max-content';
+        dropdownElement.style.zIndex = '9999';
+        dropdownElement.style.margin = '0';
+        dropdownElement.style.display = 'block';
+        dropdownElement.style.overflowY = 'auto';
+
+        if (spaceBelow >= Math.min(desiredHeight, spaceBelow) && (spaceBelow >= spaceAbove || spaceBelow >= desiredHeight)) {
+            // Enough room below (or at least as much as above) - open downward
+            dropdownElement.style.top = `${rect.bottom + margin}px`;
+            dropdownElement.style.bottom = '';
+            dropdownElement.style.maxHeight = `${Math.max(Math.min(desiredHeight, spaceBelow), 100)}px`;
+        } else {
+            // Not enough room below - flip upward instead
+            dropdownElement.style.top = '';
+            dropdownElement.style.bottom = `${viewportHeight - rect.top + margin}px`;
+            dropdownElement.style.maxHeight = `${Math.max(Math.min(desiredHeight, spaceAbove), 100)}px`;
+        }
+    };
+
+        // Store original parent for restoration
+        if (!dropdownElement._originalParent) {
+            dropdownElement._originalParent = dropdownElement.parentElement;
+        }
+
+        // Move dropdown to body if not already there
+        if (dropdownElement.parentElement !== document.body) {
+            document.body.appendChild(dropdownElement);
+        }
+
+        // Use requestAnimationFrame to ensure DOM is ready before positioning
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                updatePosition();
+            });
+        });
+
+        // Store update function for cleanup
+        dropdownElement._updatePosition = updatePosition;
+
+        // Update position on scroll and resize
+        window.addEventListener('scroll', updatePosition, true);
+        window.addEventListener('resize', updatePosition, true);
+    };
+
+    window.detachTableDropdownFromBody = (dropdownElement, containerElement) => {
+        if (!dropdownElement) return;
+
+        // Clean up event listeners
+        if (dropdownElement._updatePosition) {
+            window.removeEventListener('scroll', dropdownElement._updatePosition, true);
+            window.removeEventListener('resize', dropdownElement._updatePosition, true);
+            delete dropdownElement._updatePosition;
+        }
+
+        // Determine where to move it back
+        const targetParent = containerElement || dropdownElement._originalParent;
+
+        // Move back to original location if it exists and is in DOM
+        if (targetParent && document.body.contains(targetParent)) {
+            targetParent.appendChild(dropdownElement);
+        }
+
+        // Reset all styles
+        dropdownElement.style.position = '';
+        dropdownElement.style.top = '';
+        dropdownElement.style.left = '';
+        dropdownElement.style.minWidth = '';
+        dropdownElement.style.width = '';
+        dropdownElement.style.zIndex = '';
+        dropdownElement.style.margin = '';
+        dropdownElement.style.display = '';
+            dropdownElement.style.bottom = '';
+    dropdownElement.style.maxHeight = '';
+    dropdownElement.style.overflowY = '';
+
+        // Clean up stored reference
+        delete dropdownElement._originalParent;
+    };
+</script>

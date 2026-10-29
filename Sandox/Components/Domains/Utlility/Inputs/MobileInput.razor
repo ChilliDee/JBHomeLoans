@@ -1,0 +1,348 @@
+﻿@using Microsoft.AspNetCore.Components
+@using System.Timers
+@implements IDisposable
+
+<div class="relative">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+        @Label
+    </label>
+
+    <input type="tel"
+           name="@Name"
+           id="@Id"
+           value="@GetDisplayValue()"
+           disabled="@IsDisabled"
+           @onchange="HandleChange"
+           @oninput="HandleInput"
+           @onfocus="HandleFocus"
+           @onblur="HandleBlur"
+           inputmode="numeric"
+           pattern="[0-9]*"
+           class="@GetInputClasses()"
+           placeholder="@Placeholder" />
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action<string?>? OnChange { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Mobile Number";
+    [Parameter] public string CountryCode { get; set; } = "+1"; // Default to US
+    [Parameter] public bool AutoFormat { get; set; } = true;
+    [Parameter] public MobileFormat Format { get; set; } = MobileFormat.Australian;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public int DebounceMilliseconds { get; set; } = 1000;
+
+    private bool isEditing = false;
+    private bool _isDisposed = false;
+    private Timer? _debounceTimer;
+
+    public enum MobileFormat
+    {
+        US,          // (555) 123-4567
+        International, // +1 555 123 4567
+        Simple,      // 555-123-4567
+        Minimal,     // 5551234567
+        Australian   // (02) 1234 5678 or 0412 345 678
+    }
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+
+        base.OnInitialized();
+    }   
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "border-none block w-full rounded-md px-3 py-1.5 text-base outline-1 -outline-offset-1 placeholder:text-gray-400 sm:text-sm/6";
+
+        if (IsDisabled)
+        {
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+        }
+        else
+        {
+            return $"{baseClasses} bg-white text-gray-900 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+        }
+    }
+
+    private string GetDisplayValue()
+    {
+        if (string.IsNullOrEmpty(Value)) return string.Empty;
+
+        // If user is editing and auto-format is on, show formatted version
+        // If not editing, always show formatted version
+        if (AutoFormat && !isEditing)
+        {
+            return FormatPhoneNumber(Value);
+        }
+
+        return Value;
+    }
+
+    // NEW: Helper method to extract only numeric characters
+    private string ExtractDigitsOnly(string? input)
+    {
+        if (string.IsNullOrEmpty(input)) return string.Empty;
+        return new string(input.Where(char.IsDigit).ToArray());
+    }
+
+    private string FormatPhoneNumber(string phoneNumber)
+    {
+        if (string.IsNullOrEmpty(phoneNumber)) return phoneNumber;
+
+        // Remove all non-numeric characters for processing
+        var digits = ExtractDigitsOnly(phoneNumber);
+
+        // Handle different formats based on Format parameter
+        return Format switch
+        {
+            MobileFormat.US => FormatUSPhone(digits),
+            MobileFormat.International => FormatInternationalPhone(digits),
+            MobileFormat.Simple => FormatSimplePhone(digits),
+            MobileFormat.Australian => FormatAustralianPhone(NormalizeAustralianDigits(digits)),
+            MobileFormat.Minimal => digits,
+            _ => phoneNumber
+        };
+    }
+
+    // Converts a leading Australian country code (61) to the local trunk prefix (0),
+    // e.g. 61493320400 -> 0493320400, so numbers pasted with the country code still format correctly.
+    private string NormalizeAustralianDigits(string digits)
+    {
+        if (string.IsNullOrEmpty(digits) || !digits.StartsWith("61")) return digits;
+
+        var rest = digits.Substring(2);
+        if (rest.Length > 0 && "23478".Contains(rest[0]))
+        {
+            return "0" + rest;
+        }
+
+        return digits;
+    }
+
+    private string FormatUSPhone(string digits)
+    {
+        if (digits.Length == 0) return string.Empty;
+        if (digits.Length <= 3) return digits;
+        if (digits.Length <= 6) return $"({digits.Substring(0, 3)}) {digits.Substring(3)}";
+        if (digits.Length <= 10) return $"({digits.Substring(0, 3)}) {digits.Substring(3, 3)}-{digits.Substring(6)}";
+
+        // Handle numbers longer than 10 digits (with country code)
+        if (digits.Length == 11 && digits.StartsWith("1"))
+        {
+            var areaCode = digits.Substring(1, 3);
+            var exchange = digits.Substring(4, 3);
+            var number = digits.Substring(7, 4);
+            return $"({areaCode}) {exchange}-{number}";
+        }
+
+        return digits;
+    }
+
+    private string FormatInternationalPhone(string digits)
+    {
+        if (digits.Length == 0) return string.Empty;
+        if (digits.Length <= 3) return $"{CountryCode} {digits}";
+        if (digits.Length <= 6) return $"{CountryCode} {digits.Substring(0, 3)} {digits.Substring(3)}";
+        if (digits.Length <= 10) return $"{CountryCode} {digits.Substring(0, 3)} {digits.Substring(3, 3)} {digits.Substring(6)}";
+
+        return $"{CountryCode} {digits}";
+    }
+
+    private string FormatSimplePhone(string digits)
+    {
+        if (digits.Length == 0) return string.Empty;
+        if (digits.Length <= 3) return digits;
+        if (digits.Length <= 6) return $"{digits.Substring(0, 3)}-{digits.Substring(3)}";
+        if (digits.Length <= 10) return $"{digits.Substring(0, 3)}-{digits.Substring(3, 3)}-{digits.Substring(6)}";
+
+        return digits;
+    }
+
+    private string FormatAustralianPhone(string digits)
+    {
+        if (digits.Length == 0) return string.Empty;
+
+        // Handle mobile numbers (04xx xxx xxx)
+        if (digits.StartsWith("04") || digits.StartsWith("4"))
+        {
+            var mobileDigits = digits.StartsWith("4") ? "0" + digits : digits;
+
+            if (mobileDigits.Length <= 4) return mobileDigits;
+            if (mobileDigits.Length <= 7) return $"{mobileDigits.Substring(0, 4)} {mobileDigits.Substring(4)}";
+            if (mobileDigits.Length <= 10) return $"{mobileDigits.Substring(0, 4)} {mobileDigits.Substring(4, 3)} {mobileDigits.Substring(7)}";
+
+            return mobileDigits;
+        }
+
+        // Handle landline numbers with area codes
+        if (digits.StartsWith("0"))
+        {
+            // Major city area codes (02, 03, 07, 08)
+            if (digits.Length >= 2 && (digits.StartsWith("02") || digits.StartsWith("03") ||
+                                      digits.StartsWith("07") || digits.StartsWith("08")))
+            {
+                if (digits.Length <= 2) return $"({digits})";
+                if (digits.Length <= 6) return $"({digits.Substring(0, 2)}) {digits.Substring(2)}";
+                if (digits.Length <= 10) return $"({digits.Substring(0, 2)}) {digits.Substring(2, 4)} {digits.Substring(6)}";
+
+                return digits;
+            }
+
+            // Other area codes (3-4 digits)
+            if (digits.Length <= 4) return $"({digits})";
+            if (digits.Length <= 7) return $"({digits.Substring(0, 4)}) {digits.Substring(4)}";
+            if (digits.Length <= 10) return $"({digits.Substring(0, 4)}) {digits.Substring(4, 3)} {digits.Substring(7)}";
+        }
+
+        // Default formatting for other numbers
+        if (digits.Length <= 3) return digits;
+        if (digits.Length <= 6) return $"{digits.Substring(0, 3)} {digits.Substring(3)}";
+        if (digits.Length <= 10) return $"{digits.Substring(0, 3)} {digits.Substring(3, 3)} {digits.Substring(6)}";
+
+        return digits;
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled || _isDisposed) return; // Don't process events when disabled
+        await ProcessInput(e.Value?.ToString());
+    }
+
+    private async Task HandleInput(ChangeEventArgs e)
+    {
+        if (IsDisabled || _isDisposed) return; // Don't process events when disabled
+        // For real-time formatting as user types
+        await ProcessInput(e.Value?.ToString());
+    }
+
+    private async Task ProcessInput(string? inputValue)
+    {
+        // CHANGED: Always extract digits only from input
+        var digitsOnly = ExtractDigitsOnly(inputValue);
+
+        // Store only the numeric digits
+        Value = digitsOnly;
+
+        // Call synchronous callback immediately
+        OnChange?.Invoke(Value);
+
+        // Always notify parent of value change immediately
+        if (!_isDisposed)
+            await ValueChanged.InvokeAsync(Value);
+
+        // Debounce the async callback
+        if (AsyncCallBack != null)
+        {
+            if (DebounceMilliseconds > 0)
+            {
+                // Reset timer on each keystroke
+                _debounceTimer?.Stop();
+                _debounceTimer?.Dispose();
+
+                _debounceTimer = new Timer(DebounceMilliseconds);
+                _debounceTimer.Elapsed += async (_, __) =>
+                {
+                    _debounceTimer?.Stop();
+                    _debounceTimer?.Dispose();
+                    _debounceTimer = null;
+
+                    // Must marshal back to UI thread
+                    await InvokeAsync(async () =>
+                    {
+                        if (_isDisposed) return;
+                        if (AsyncCallBack != null)
+                            await AsyncCallBack();
+                    });
+                };
+                _debounceTimer.AutoReset = false;
+                _debounceTimer.Start();
+            }
+            else
+            {
+                // No debounce - fire immediately
+                if (!_isDisposed)
+                    await AsyncCallBack();
+            }
+        }
+
+        // Force re-render to show formatting
+        StateHasChanged();
+    }
+
+    private void HandleFocus()
+    {
+        if (IsDisabled) return; // Don't handle focus when disabled
+
+        isEditing = true;
+        if (AutoFormat)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleBlur()
+    {
+        if (IsDisabled) return; // Don't handle blur when disabled
+
+        isEditing = false;
+
+        // Normalise a leading country code (e.g. 61493320400 -> 0493320400) once the user leaves the field
+        if (Format == MobileFormat.Australian && !string.IsNullOrEmpty(Value))
+        {
+            var normalized = NormalizeAustralianDigits(Value);
+            if (normalized != Value)
+            {
+                Value = normalized;
+                OnChange?.Invoke(Value);
+
+                if (!_isDisposed)
+                    await ValueChanged.InvokeAsync(Value);
+
+                if (AsyncCallBack != null && !_isDisposed)
+                {
+                    // Cancel any pending debounced save so we don't overwrite the normalised value with a stale one
+                    _debounceTimer?.Stop();
+                    _debounceTimer?.Dispose();
+                    _debounceTimer = null;
+
+                    await AsyncCallBack();
+                }
+            }
+        }
+
+        if (AutoFormat)
+        {
+            StateHasChanged();
+        }
+    }
+
+    // Helper method to get clean phone number (digits only)
+    public string GetCleanPhoneNumber()
+    {
+        return ExtractDigitsOnly(Value);
+    }
+
+    // Helper method to get formatted phone number for display
+    public string GetFormattedPhoneNumber()
+    {
+        return FormatPhoneNumber(Value ?? string.Empty);
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        _debounceTimer?.Stop();
+        _debounceTimer?.Dispose();
+        _debounceTimer = null;
+
+        // Unsubscribe from PropertyChanged events to prevent memory leaks
+    }
+}

@@ -1,0 +1,130 @@
+﻿@using Microsoft.AspNetCore.Components
+@using System.Globalization
+@implements IDisposable
+
+<div class="relative w-full h-full">
+    <span class="absolute left-3 top-1/2 transform -translate-y-1/2 @(IsDisabled ? "text-gray-300" : "text-gray-500") text-sm z-10">@CurrencySymbol</span>
+    <input type="text"
+           name="@Name"
+           id="@Id"
+           value="@GetDisplayValue()"
+           disabled="@IsDisabled"
+           @onchange="HandleChange"
+           @onfocus="HandleFocus"
+           @onblur="HandleBlur"
+           class="@GetInputClasses()"
+           placeholder="@Placeholder" />
+</div>
+
+@code {
+    [Parameter] public decimal? Value { get; set; }
+    [Parameter] public EventCallback<decimal?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action<decimal?>? OnChange { get; set; }
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "0.00";
+    [Parameter] public string CurrencySymbol { get; set; } = "$";
+    [Parameter] public int DecimalPlaces { get; set; } = 2;
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    private bool isEditing = false;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+
+        base.OnInitialized();
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "block w-full h-full pl-8 pr-3 py-1.5 text-base placeholder:text-gray-400 sm:text-sm/6 border-0 outline-none focus:outline-none focus:ring-0 focus:border-0";
+
+        if (IsDisabled)
+        {
+            return $"{baseClasses} bg-gray-50 text-gray-500 cursor-not-allowed";
+        }
+        else
+        {
+            return $"{baseClasses} text-gray-900";
+        }
+    }
+
+    private string GetDisplayValue()
+    {
+        if (Value == null) return string.Empty;
+
+        // If user is currently editing and not disabled, show raw value for easier editing
+        if (isEditing && !IsDisabled)
+            return Value.Value.ToString($"F{DecimalPlaces}", CultureInfo.CurrentCulture);
+
+        // Show formatted value with commas
+        return Value.Value.ToString($"N{DecimalPlaces}", CultureInfo.CurrentCulture);
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return; // Don't process events when disabled
+
+        var stringValue = e.Value?.ToString();
+        if (string.IsNullOrEmpty(stringValue))
+        {
+            Value = null;
+        }
+        else
+        {
+            // Clean the value for parsing (remove currency symbols, commas, etc.)
+            var cleanValue = CleanValueForParsing(stringValue);
+            if (decimal.TryParse(cleanValue, NumberStyles.Number, CultureInfo.CurrentCulture, out var parsedValue))
+            {
+                Value = parsedValue;
+            }
+            else
+            {
+                Value = null;
+            }
+        }
+
+        // Call callbacks
+        OnChange?.Invoke(Value);
+        await ValueChanged.InvokeAsync(Value);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+    }
+
+    private string CleanValueForParsing(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+
+        // Remove currency symbols, commas, and extra spaces
+        return value
+            .Replace(CurrencySymbol, "")
+            .Replace(",", "")
+            .Replace(" ", "")
+            .Trim();
+    }
+
+    private void HandleFocus()
+    {
+        if (IsDisabled) return; // Don't handle focus when disabled
+
+        isEditing = true;
+        StateHasChanged();
+    }
+
+    private void HandleBlur()
+    {
+        if (IsDisabled) return; // Don't handle blur when disabled
+
+        isEditing = false;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe from PropertyChanged events to prevent memory leaks
+    }
+}

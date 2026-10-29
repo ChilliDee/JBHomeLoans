@@ -1,0 +1,376 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+
+<div class="relative" @ref="rootRef">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") z-10">
+        @Label
+    </label>
+
+    <div class="block w-full rounded-md px-3 py-2 text-base text-gray-900 outline-1 -outline-offset-1 sm:text-sm/6 min-h-[38px] @GetContainerOutlineClasses()">
+        @if (SelectedOptions == null || !SelectedOptions.Any())
+        {
+            <!-- When no options selected, show placeholder with dropdown arrow on same line -->
+            <div class="flex items-center justify-between">
+                <button type="button"
+                        id="@Id"
+                        name="@Name"
+                        disabled="@IsDisabled"
+                        @onclick="ToggleDropdown"
+                        class="flex-1 bg-transparent border-0 outline-0 text-left @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer")">
+                    <span class="@(IsDisabled ? "text-gray-300" : "text-gray-400")">@Placeholder</span>
+                </button>
+                <svg class="size-4 @(IsDisabled ? "text-gray-300" : "text-gray-400") flex-shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+                </svg>
+            </div>
+        }
+        else
+        {
+            <!-- When options are selected, show tags with dropdown arrow, then "add more" below -->
+            <div class="space-y-2">
+                <div class="flex flex-wrap gap-1.5 items-center">
+                    @foreach (var selectedOption in SelectedOptions)
+                    {
+                        <span class="inline-flex items-center gap-x-1 rounded-md @(IsDisabled ? "bg-gray-100 text-gray-500 ring-gray-300/50" : "bg-accent-50 text-accent-700 ring-accent-700/10") px-2 py-1 text-xs font-medium ring-1 ring-inset flex-shrink-0">
+                            @selectedOption.Value
+                            <button type="button"
+                                    disabled="@IsDisabled"
+                                    @onclick="() => RemoveOption(selectedOption)"
+                                    class="group relative -mr-1 h-3.5 w-3.5 rounded-sm @(IsDisabled ? "cursor-not-allowed" : "hover:bg-accent-600/20")">
+                                <span class="sr-only">Remove</span>
+                                <svg viewBox="0 0 14 14" class="h-3.5 w-3.5 @(IsDisabled ? "stroke-gray-400" : "stroke-accent-700/50 group-hover:stroke-accent-700/75")">
+                                    <path d="m4 4 6 6m0-6-6 6" />
+                                </svg>
+                            </button>
+                        </span>
+                    }
+                </div>
+                <button type="button"
+                        id="@Id"
+                        name="@Name"
+                        disabled="@IsDisabled"
+                        @onclick="ToggleDropdown"
+                        class="w-full bg-transparent border-0 outline-0 text-left @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer")">
+                    <span class="@(IsDisabled ? "text-gray-300" : "text-gray-400") text-xs">@(IsDisabled ? "Disabled" : "Click to add more...")</span>
+                </button>
+            </div>
+        }
+    </div>
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+
+    @if (isOpen && !IsDisabled)
+    {
+        <div class="absolute z-50 mt-1 w-full rounded-md bg-white shadow-lg ring-1 ring-black/5">
+            <!-- Search input -->
+            <div class="p-2 border-b border-gray-200">
+                <div class="relative">
+                    <input type="text"
+                           @bind="searchText"
+                           @bind:event="oninput"
+                           @onkeydown="HandleSearchKeyDown"
+                           placeholder="Search..."
+                           class="w-full border-0 py-1.5 pl-8 pr-3 text-gray-900 placeholder:text-gray-400 focus:outline-none sm:text-sm bg-transparent"
+                           @ref="searchInputRef" />
+                    <div class="absolute inset-y-0 left-0 flex items-center pl-2">
+                        <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Options list -->
+            <ul class="max-h-60 overflow-auto py-1 text-base sm:text-sm"
+                tabindex="-1"
+                role="listbox"
+                aria-labelledby="@Id">
+
+                @if (FilteredOptions != null && FilteredOptions.Any())
+                {
+                    @foreach (var option in FilteredOptions)
+                    {
+                        var isSelected = SelectedOptions?.Any(s => s.Id == option.Id) ?? false;
+                        <li class="relative cursor-pointer py-2 pr-4 pl-8 text-gray-900 hover:bg-gray-100 @(isSelected ? "bg-accent-50" : "")"
+                            role="option"
+                            @onclick="() => ToggleOption(option)"
+                            @onmousedown:preventDefault="true">
+                            <span class="block truncate @(isSelected ? "text-accent-600 font-medium" : "font-normal")">@option.Value</span>
+                            @if (isSelected)
+                            {
+                                <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">
+                                    <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"></path>
+                                    </svg>
+                                </span>
+                            }
+                        </li>
+                    }
+                }
+                else
+                {
+                    <li class="relative cursor-default py-2 pr-4 pl-8 text-gray-500 select-none">
+                        <span class="block truncate">No options found</span>
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+</div>
+
+<script>
+    window.multiSelect = window.multiSelect || {
+        currentElement: null,
+        currentDotNetRef: null,
+        clickHandler: null,
+
+        registerOutsideClick: function (element, dotNetRef) {
+            // Clean up previous registration if any
+            this.deregisterOutsideClick();
+
+            this.currentElement = element;
+            this.currentDotNetRef = dotNetRef;
+
+            this.clickHandler = (event) => {
+                if (element && !element.contains(event.target)) {
+                    dotNetRef.invokeMethodAsync('CloseFromOutside');
+                }
+            };
+
+            document.addEventListener('click', this.clickHandler);
+        },
+
+        deregisterOutsideClick: function () {
+            if (this.clickHandler) {
+                document.removeEventListener('click', this.clickHandler);
+                this.clickHandler = null;
+            }
+            this.currentElement = null;
+            this.currentDotNetRef = null;
+        }
+    };
+</script>
+
+@code {
+    [Inject] private IJSRuntime JS { get; set; }
+
+    [Parameter] public List<MultiSelectDropDownOption>? SelectedOptions { get; set; }
+    [Parameter] public EventCallback<List<MultiSelectDropDownOption>?> AsyncCallBack { get; set; }
+    [Parameter] public Action<List<MultiSelectDropDownOption>?>? OnChange { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public EventCallback<List<MultiSelectDropDownOption>?> SelectedOptionsChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Select options...";
+    [Parameter] public IEnumerable<MultiSelectDropDownOption>? Options { get; set; }
+    [Parameter] public bool CloseOnOutsideClick { get; set; } = true;
+    [Parameter] public bool CloseOnEscape { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    private bool isOpen = false;
+    private string searchText = string.Empty;
+    private ElementReference searchInputRef;
+    private ElementReference rootRef;
+    private DotNetObjectReference<MultiSelectDropdown>? selfRef;
+    private bool isDisposed = false;
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    public class MultiSelectDropDownOption
+    {
+        public MultiSelectDropDownOption(string value, int? id = null)
+        {
+            Id = id ?? 0;
+            Value = value;
+        }
+
+        public int Id { get; set; }
+        public string Value { get; set; } = string.Empty;
+    }
+
+    private bool IsDisabled => Disabled;
+
+    private IEnumerable<MultiSelectDropDownOption>? FilteredOptions =>
+        string.IsNullOrWhiteSpace(searchText)
+            ? Options
+            : Options?.Where(o => o.Value.Contains(searchText, StringComparison.OrdinalIgnoreCase));
+
+    private string GetContainerOutlineClasses()
+    {
+        if (IsDisabled)
+            return "bg-gray-50 outline-gray-200";
+
+        if (isInvalid)
+            return "bg-white outline-red-500 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-red-500";
+
+        return "bg-white outline-gray-300 focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-accent-600";
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && (SelectedOptions == null || !SelectedOptions.Any()))
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    protected override void OnInitialized()
+    {
+
+        SelectedOptions ??= new List<MultiSelectDropDownOption>();
+        selfRef = DotNetObjectReference.Create(this);
+
+        ValidationRef?.Invoke(Validate);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (isDisposed) return;
+
+        try
+        {
+            if (CloseOnOutsideClick && isOpen && !IsDisabled)
+            {
+                await JS.InvokeVoidAsync("multiSelect.registerOutsideClick", rootRef, selfRef);
+            }
+            else if (!isOpen)
+            {
+                await JS.InvokeVoidAsync("multiSelect.deregisterOutsideClick");
+            }
+        }
+        catch (JSDisconnectedException)
+        {
+            // Expected during rapid navigation - ignore
+        }
+        catch (TaskCanceledException)
+        {
+            // Expected during disposal - ignore
+        }
+    }
+
+    [JSInvokable]
+    public Task CloseFromOutside()
+    {
+        if (isDisposed) return Task.CompletedTask;
+
+        if (isOpen)
+        {
+            isOpen = false;
+            StateHasChanged();
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task ToggleOption(MultiSelectDropDownOption option)
+    {
+        if (IsDisabled) return;
+
+        SelectedOptions ??= new List<MultiSelectDropDownOption>();
+
+        var existing = SelectedOptions.FirstOrDefault(s => s.Id == option.Id);
+        if (existing != null)
+            SelectedOptions.Remove(existing);
+        else
+            SelectedOptions.Add(option);
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        OnChange?.Invoke(SelectedOptions);
+
+        await SelectedOptionsChanged.InvokeAsync(SelectedOptions);
+        await AsyncCallBack.InvokeAsync(SelectedOptions);
+
+        await Task.Yield();
+    }
+
+    private async Task RemoveOption(MultiSelectDropDownOption option)
+    {
+        if (IsDisabled) return;
+
+        if (SelectedOptions != null)
+        {
+            SelectedOptions.Remove(option);
+
+            isInvalid = false;
+            errorMessage = string.Empty;
+
+            OnChange?.Invoke(SelectedOptions);
+
+            await SelectedOptionsChanged.InvokeAsync(SelectedOptions);
+            await AsyncCallBack.InvokeAsync(SelectedOptions);
+        }
+    }
+
+    private async Task ToggleDropdown()
+    {
+        if (IsDisabled) return;
+
+        isOpen = !isOpen;
+
+        if (isOpen)
+        {
+            searchText = string.Empty;
+            StateHasChanged();
+
+            await Task.Delay(50);
+            try
+            {
+                await searchInputRef.FocusAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Expected during navigation - ignore
+            }
+        }
+    }
+
+    private void HandleSearchKeyDown(KeyboardEventArgs e)
+    {
+        if (CloseOnEscape && e.Key == "Escape")
+        {
+            isOpen = false;
+            searchText = string.Empty;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (isDisposed) return;
+        isDisposed = true;
+
+        // Unsubscribe from PropertyChanged events
+
+        // Deregister JavaScript event listener BEFORE disposing the reference
+        try
+        {
+            await JS.InvokeVoidAsync("multiSelect.deregisterOutsideClick");
+        }
+        catch (JSDisconnectedException)
+        {
+            // Expected during circuit disconnect - ignore
+        }
+        catch (TaskCanceledException)
+        {
+            // Expected during disposal - ignore
+        }
+
+        // Now dispose the DotNetObjectReference
+        selfRef?.Dispose();
+    }
+}

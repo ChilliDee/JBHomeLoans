@@ -1,0 +1,63 @@
+<div id="@_d.I.ClassName" class="bg-amber-400">
+    @if (_d.I.InitialisationCompleted == false || _d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestIsLoading)
+    {
+        <div class="flex min-h-96 items-center justify-center gap-3 p-6 text-sm text-slate-900">
+            <svg class="animate-spin w-4 h-4 text-slate-950" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Loading...
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasFailed)
+    {
+        <div class="mx-4 my-3 flex items-start gap-3 p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+            <svg class="w-4 h-4 mt-0.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            @_d.RC_Internal.Initialise_HD_.ResponseData.ErrorMessage
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasCompleted)
+    {
+        <div class="mx-auto max-w-5xl px-6 pb-44 pt-14 text-center md:pt-20 lg:px-8">
+            <p class="inline-flex items-center rounded-full bg-slate-950 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-amber-400">
+                Motor vehicle finance
+            </p>
+
+            <h1 class="mt-8 text-5xl font-black leading-none tracking-tight text-slate-950 sm:text-6xl md:text-7xl">
+                Vehicle finance without the runaround
+            </h1>
+
+            <p class="mx-auto mt-6 max-w-2xl text-lg text-slate-900 md:text-xl">
+                Cars, utes, motorbikes, caravans and more. Tell us what you are buying and see what the repayments could look like.
+            </p>
+
+            <div class="mt-10 flex flex-wrap items-center justify-center gap-4">
+                <a href="/home#calculator"
+                   class="inline-flex items-center gap-2 rounded-full bg-slate-950 px-8 py-4 text-base font-semibold text-white transition-colors hover:bg-slate-800">
+                    Calculate repayments
+                    <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                    </svg>
+                </a>
+                <a href="/home#how-it-works"
+                   class="inline-flex items-center rounded-full border-2 border-slate-950 px-8 py-3.5 text-base font-semibold text-slate-950 transition-colors hover:bg-slate-950 hover:text-white">
+                    How it works
+                </a>
+            </div>
+
+            <ul class="mt-10 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+                @foreach (var highlight in _d.I.Inputs.Items)
+                {
+                    <li class="flex items-center gap-2 text-sm font-medium text-slate-950">
+                        <svg class="w-4 h-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                        </svg>
+                        @highlight.Text
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+</div>

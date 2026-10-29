@@ -1,0 +1,96 @@
+﻿@using Microsoft.AspNetCore.Components
+@implements IDisposable
+
+<div class="relative w-full h-full">
+    <input type="text"
+           name="@Name"
+           id="@Id"
+           value="@Value"
+           disabled="@IsDisabled"
+           @onchange="HandleChange"
+           @onfocus="HandleFocus"
+           @onblur="HandleBlur"
+           maxlength="@(MaxLength > 0 ? MaxLength : null)"
+           class="@GetInputClasses()"
+           placeholder="@Placeholder" />
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action<string?>? OnChange { get; set; }
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Enter text...";
+    [Parameter] public int? MaxLength { get; set; }
+    [Parameter] public bool TrimWhitespace { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+
+        base.OnInitialized();
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "block w-full h-full px-3 py-1.5 text-base placeholder:text-gray-400 sm:text-sm/6 border-0 outline-none focus:outline-none focus:ring-0 focus:border-0";
+
+        if (IsDisabled)
+        {
+            return $"{baseClasses} bg-gray-50 text-gray-500 cursor-not-allowed";
+        }
+        else
+        {
+            return $"{baseClasses} text-gray-900";
+        }
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return; // Don't process events when disabled
+
+        var stringValue = e.Value?.ToString();
+
+        // Apply trimming if enabled
+        if (TrimWhitespace && !string.IsNullOrEmpty(stringValue))
+        {
+            stringValue = stringValue.Trim();
+        }
+
+        // Apply max length if specified
+        if (MaxLength.HasValue && !string.IsNullOrEmpty(stringValue) && stringValue.Length > MaxLength.Value)
+        {
+            stringValue = stringValue.Substring(0, MaxLength.Value);
+        }
+
+        Value = stringValue;
+
+        // Call callbacks
+        OnChange?.Invoke(Value);
+        await ValueChanged.InvokeAsync(Value);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+    }
+
+    private void HandleFocus()
+    {
+        if (IsDisabled) return; // Don't handle focus when disabled
+        // Can be used for future focus-related logic
+    }
+
+    private void HandleBlur()
+    {
+        if (IsDisabled) return; // Don't handle blur when disabled
+        // Can be used for future blur-related logic (like validation)
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe from PropertyChanged events to prevent memory leaks
+    }
+}

@@ -1,0 +1,136 @@
+﻿@using Microsoft.AspNetCore.Components
+@implements IDisposable
+
+<div class="relative">
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <label class="block text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") mb-1.5">
+            @Label
+        </label>
+    }
+    <div class="flex gap-2">
+        <button type="button"
+                disabled="@IsDisabled"
+                @onclick="() => HandleSelect(true)"
+                class="@GetButtonClasses(true)">
+            Yes
+        </button>
+        <button type="button"
+                disabled="@IsDisabled"
+                @onclick="() => HandleSelect(false)"
+                class="@GetButtonClasses(false)">
+            No
+        </button>
+    </div>
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool? Value { get; set; }
+    [Parameter] public EventCallback<bool?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public bool AllowNull { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    /// <summary>
+    /// Pass your code-behind RemoveValidator method here. The component removes
+    /// its own Validate method from your list on dispose.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationUnref { get; set; }
+
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        ValidationRef?.Invoke(Validate);
+        base.OnInitialized();
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && Value is null)
+        {
+            isInvalid = true;
+            errorMessage = "Please select Yes or No";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private async Task HandleSelect(bool selected)
+    {
+        if (IsDisabled) return;
+
+        if (AllowNull && Value == selected)
+            Value = null;
+        else
+            Value = selected;
+
+        if (Value is not null)
+        {
+            isInvalid = false;
+            errorMessage = string.Empty;
+        }
+
+        await ValueChanged.InvokeAsync(Value);
+        await InvokeCallbacks();
+    }
+
+    private async Task InvokeCallbacks()
+    {
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+
+        CallBack?.Invoke();
+    }
+
+    private string GetButtonClasses(bool buttonValue)
+    {
+        var isSelected = Value == buttonValue;
+        var baseClasses = "px-4 py-1.5 rounded-md text-sm font-medium transition-colors focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+
+        if (IsDisabled)
+        {
+            if (isSelected)
+                return $"{baseClasses} bg-gray-100 text-gray-400 cursor-not-allowed border border-gray-200";
+            return $"{baseClasses} bg-white text-gray-300 cursor-not-allowed border border-gray-200";
+        }
+
+        if (isInvalid && Value is null)
+            return $"{baseClasses} bg-white text-gray-700 border border-red-400 hover:bg-gray-50 cursor-pointer";
+
+        if (isSelected)
+        {
+            return buttonValue
+                ? $"{baseClasses} bg-accent-600 text-white border border-accent-600 hover:bg-accent-500 cursor-pointer"
+                : $"{baseClasses} bg-red-500 text-white border border-red-500 hover:bg-red-400 cursor-pointer";
+        }
+
+        return $"{baseClasses} bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 cursor-pointer";
+    }
+
+    public void Dispose()
+    {
+        ValidationUnref?.Invoke(Validate);
+    }
+}

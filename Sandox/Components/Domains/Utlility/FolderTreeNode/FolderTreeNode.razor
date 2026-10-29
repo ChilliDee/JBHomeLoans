@@ -1,0 +1,47 @@
+﻿@* Recursive folder row — renders itself for each child, so nesting is unlimited.
+   Recursion stops naturally once FoldersByParentKey has no entry for a folder's Id. *@
+
+@if (CurrentFolder is not null)
+{
+    <div>
+        <div class="@GetFolderRowCss(CurrentFolder.Id)">
+            @if (CurrentFolder.ChildFolderCount > 0)
+            {
+                <span class="w-4 text-center cursor-pointer" @onclick="ToggleAsync">
+                    @(IsFolderExpanded(CurrentFolder.Id) ? "▾" : "▸")
+                </span>
+            }
+            else
+            {
+                <span class="w-4"></span>
+            }
+            <span class="flex-1 truncate" @onclick="SelectAsync">
+                @CurrentFolder.DisplayName
+            </span>
+            @if (CurrentFolder.UnreadItemCount > 0)
+            {
+                <span class="text-xs text-gray-400">@CurrentFolder.UnreadItemCount</span>
+            }
+        </div>
+
+        @if (IsFolderExpanded(CurrentFolder.Id) && FoldersByParentKey.ContainsKey(CurrentFolder.Id))
+        {
+            <div class="ml-5 space-y-0.5">
+                @foreach (var childFolder in FoldersByParentKey[CurrentFolder.Id])
+                {
+                    <FolderTreeNode @key="childFolder.Id"
+                                    CurrentFolder="childFolder"
+                                    FoldersByParentKey="FoldersByParentKey"
+                                    GetFolderRowCss="GetFolderRowCss"
+                                    IsFolderExpanded="IsFolderExpanded"
+                                    AreChildFoldersLoaded="AreChildFoldersLoaded"
+                                    GetChildFoldersAsync="GetChildFoldersAsync"
+                                    ApplyChildFoldersToTree="ApplyChildFoldersToTree"
+                                    ToggleFolderExpanded="ToggleFolderExpanded"
+                                    SelectFolder="SelectFolder"
+                                    OnStateUpdate="OnStateUpdate" />
+                }
+            </div>
+        }
+    </div>
+}

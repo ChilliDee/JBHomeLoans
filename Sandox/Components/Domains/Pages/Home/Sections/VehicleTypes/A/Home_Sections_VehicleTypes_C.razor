@@ -1,0 +1,44 @@
+<div id="@_d.I.ClassName" class="bg-white">
+    @if (_d.I.InitialisationCompleted == false || _d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestIsLoading)
+    {
+        <div class="flex items-center justify-center gap-3 p-6 text-sm text-slate-500">
+            <svg class="animate-spin w-4 h-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Loading...
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasFailed)
+    {
+        <div class="mx-4 my-3 flex items-start gap-3 p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+            <svg class="w-4 h-4 mt-0.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            @_d.RC_Internal.Initialise_HD_.ResponseData.ErrorMessage
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasCompleted)
+    {
+        @* Pulled up so the tiles sit over the bottom of the hero *@
+        <div class="relative z-10 mx-auto -mt-28 max-w-7xl px-6 lg:px-8">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                @foreach (var vehicleType in _d.I.Inputs.Items)
+                {
+                    <a href="/home#calculator"
+                       class="group flex items-center justify-between gap-4 rounded-2xl bg-white p-6 shadow-lg ring-1 ring-slate-950/5 transition duration-200 hover:-translate-y-1 hover:shadow-xl">
+                        <span>
+                            <span class="block text-xl font-bold tracking-tight text-slate-950">@vehicleType.Title</span>
+                            <span class="mt-1 block text-sm text-slate-600">@vehicleType.Description</span>
+                        </span>
+                        <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-400 text-slate-950 transition-colors group-hover:bg-slate-950 group-hover:text-amber-400">
+                            <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5 21 12m0 0-7.5 7.5M21 12H3" />
+                            </svg>
+                        </span>
+                    </a>
+                }
+            </div>
+        </div>
+    }
+</div>

@@ -1,0 +1,19 @@
+﻿@using TinyMCE.Blazor
+
+
+<Editor @bind-Value="Html"
+        ScriptSrc="lib/tinymce/tinymce.min.js"
+        LicenseKey="gpl"
+        Conf="@_conf" />
+
+
+@code {
+    [Parameter]
+    public string Html { get; set; } = "";
+
+
+    private Dictionary<string, object> _conf = new()
+    {
+        { "height", "100%" }
+    };
+}

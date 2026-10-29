@@ -1,0 +1,246 @@
+﻿@using Microsoft.AspNetCore.Components
+@using System.Globalization
+@implements IDisposable
+
+<div class="relative">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") z-10">
+        @Label
+    </label>
+    <div class="flex items-center border @(IsDisabled ? "border-gray-200 bg-gray-50" : "border-gray-300 bg-white focus-within:border-accent-600 focus-within:ring-1 focus-within:ring-accent-600") rounded-md">
+        <!-- Min Value Input -->
+        <div class="relative flex-1">
+            <span class="absolute left-3 top-1/2 transform -translate-y-1/2 @(IsDisabled ? "text-gray-300" : "text-gray-500") text-sm z-10">@CurrencySymbol</span>
+            <input type="text"
+                   name="@(Name)_min"
+                   id="@Id"
+                   value="@GetDisplayValue(MinValue, isEditingMin)"
+                   disabled="@IsDisabled"
+                   @onchange="@(async (e) => await HandleMinChange(e))"
+                   @onfocus="HandleMinFocus"
+                   @onblur="HandleMinBlur"
+                   class="@GetMinInputClasses()"
+                   placeholder="@MinPlaceholder" />
+        </div>
+
+        <!-- Separator -->
+        <div class="flex-shrink-0 px-2 @(IsDisabled ? "text-gray-300" : "text-gray-400") text-sm font-medium">
+            to
+        </div>
+
+        <!-- Max Value Input -->
+        <div class="relative flex-1">
+            <span class="absolute left-3 top-1/2 transform -translate-y-1/2 @(IsDisabled ? "text-gray-300" : "text-gray-500") text-sm z-10">@CurrencySymbol</span>
+            <input type="text"
+                   name="@(Name)_max"
+                   id="@(Id)_max"
+                   value="@GetDisplayValue(MaxValue, isEditingMax)"
+                   disabled="@IsDisabled"
+                   @onchange="@(async (e) => await HandleMaxChange(e))"
+                   @onfocus="HandleMaxFocus"
+                   @onblur="HandleMaxBlur"
+                   class="@GetMaxInputClasses()"
+                   placeholder="@MaxPlaceholder" />
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public decimal? MinValue { get; set; }
+    [Parameter] public decimal? MaxValue { get; set; }
+    [Parameter] public EventCallback<decimal?> MinValueChanged { get; set; }
+    [Parameter] public EventCallback<decimal?> MaxValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string MinPlaceholder { get; set; } = "Min";
+    [Parameter] public string MaxPlaceholder { get; set; } = "Max";
+    [Parameter] public string CurrencySymbol { get; set; } = "$";
+    [Parameter] public int DecimalPlaces { get; set; } = 2;
+    [Parameter] public bool AllowNull { get; set; } = true;
+    [Parameter] public bool ValidateRange { get; set; } = true; // Ensure min <= max
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    private bool isEditingMin = false;
+    private bool isEditingMax = false;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+
+        base.OnInitialized();
+    }
+
+    private string GetMinInputClasses()
+    {
+        var baseClasses = "border-none block w-full rounded-l-md bg-transparent pl-8 pr-2 py-1.5 text-base outline-none placeholder:text-gray-400 sm:text-sm/6";
+
+        if (IsDisabled)
+        {
+            return $"{baseClasses} text-gray-500 cursor-not-allowed";
+        }
+        else
+        {
+            return $"{baseClasses} text-gray-900";
+        }
+    }
+
+    private string GetMaxInputClasses()
+    {
+        var baseClasses = "border-none block w-full rounded-r-md bg-transparent pl-8 pr-3 py-1.5 text-base outline-none placeholder:text-gray-400 sm:text-sm/6";
+
+        if (IsDisabled)
+        {
+            return $"{baseClasses} text-gray-500 cursor-not-allowed";
+        }
+        else
+        {
+            return $"{baseClasses} text-gray-900";
+        }
+    }
+
+    private string GetDisplayValue(decimal? value, bool isEditing)
+    {
+        if (value == null) return string.Empty;
+
+        // If user is currently editing and not disabled, show raw value for easier editing
+        if (isEditing && !IsDisabled)
+            return value.ToString() ?? string.Empty;
+
+        // Show formatted value with commas
+        return value.Value.ToString($"N{DecimalPlaces}", CultureInfo.CurrentCulture);
+    }
+
+    private async Task HandleMinChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return; // Don't process events when disabled
+
+        var newValue = await ParseValue(e.Value?.ToString());
+
+        // Validate range if enabled
+        if (ValidateRange && newValue.HasValue && MaxValue.HasValue && newValue > MaxValue)
+        {
+            // Option 1: Don't allow invalid range - keep previous value
+            // Option 2: Auto-adjust max value to match min
+            // MaxValue = newValue;
+            // await MaxValueChanged.InvokeAsync(MaxValue);
+        }
+        else
+        {
+            MinValue = newValue;
+            await MinValueChanged.InvokeAsync(MinValue);
+        }
+
+        await InvokeCallbacks();
+    }
+
+    private async Task HandleMaxChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return; // Don't process events when disabled
+
+        var newValue = await ParseValue(e.Value?.ToString());
+
+        // Validate range if enabled
+        if (ValidateRange && newValue.HasValue && MinValue.HasValue && newValue < MinValue)
+        {
+            // Option 1: Don't allow invalid range - keep previous value
+            // Option 2: Auto-adjust min value to match max
+            // MinValue = newValue;
+            // await MinValueChanged.InvokeAsync(MinValue);
+        }
+        else
+        {
+            MaxValue = newValue;
+            await MaxValueChanged.InvokeAsync(MaxValue);
+        }
+
+        await InvokeCallbacks();
+    }
+
+    private async Task<decimal?> ParseValue(string? stringValue)
+    {
+        // Handle empty/null input
+        if (string.IsNullOrWhiteSpace(stringValue))
+        {
+            return AllowNull ? null : 0;
+        }
+
+        // Clean the value for parsing (remove currency symbols, commas, etc.)
+        var cleanValue = CleanValueForParsing(stringValue);
+
+        if (string.IsNullOrWhiteSpace(cleanValue))
+        {
+            return AllowNull ? null : 0;
+        }
+        else if (decimal.TryParse(cleanValue, NumberStyles.Number, CultureInfo.CurrentCulture, out var parsedValue))
+        {
+            return parsedValue;
+        }
+        else
+        {
+            // Invalid input - return null or 0 based on AllowNull setting
+            return AllowNull ? null : 0;
+        }
+    }
+
+    private async Task InvokeCallbacks()
+    {
+        // Call async callback if provided
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+
+        // Call non-async callback if provided
+        CallBack?.Invoke();
+    }
+
+    private string CleanValueForParsing(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+
+        // Remove currency symbols, commas, and extra spaces
+        return value
+            .Replace(CurrencySymbol, "")
+            .Replace(",", "")
+            .Replace(" ", "")
+            .Trim();
+    }
+
+    private void HandleMinFocus()
+    {
+        if (IsDisabled) return; // Don't handle focus when disabled
+
+        isEditingMin = true;
+        StateHasChanged();
+    }
+
+    private void HandleMinBlur()
+    {
+        if (IsDisabled) return; // Don't handle blur when disabled
+
+        isEditingMin = false;
+        StateHasChanged();
+    }
+
+    private void HandleMaxFocus()
+    {
+        if (IsDisabled) return; // Don't handle focus when disabled
+
+        isEditingMax = true;
+        StateHasChanged();
+    }
+
+    private void HandleMaxBlur()
+    {
+        if (IsDisabled) return; // Don't handle blur when disabled
+
+        isEditingMax = false;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        // Unsubscribe from PropertyChanged events to prevent memory leaks
+    }
+}

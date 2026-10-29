@@ -1,0 +1,52 @@
+﻿<!-- Backdrop + centering wrapper -->
+<div class="fixed inset-0 bg-black/40 z-100 flex items-center justify-center"
+     @onclick="async () => { if (CloseOnOutsideClick) await _act.Close(); }">
+    <!-- Modal -->
+    <div class="bg-white rounded-lg shadow-2xl border border-gray-300 z-50 flex flex-col"
+         style="@_switch.GetModalSizeCss()"
+         @onclick:stopPropagation="true">
+        <!-- Header -->
+        @if (ShowHeader)
+        {
+            <div class="bg-accent-600 px-4 py-3 flex items-center justify-between rounded-t-lg">
+                <h3 class="text-white font-semibold text-base">@_d.I.Title</h3>
+                @if (_d.I.ShowCloseButton)
+                {
+                    <button @onclick="async () => await _act.Close()"
+                            class="text-white hover:text-gray-200 transition-colors cursor-pointer"
+                            type="button">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                }
+            </div>
+        }
+        <!-- Content -->
+        <div class="p-4 flex-1 min-h-0 flex flex-col" id="genericModalBody">
+            @_d.I.ChildContent
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public bool CloseOnOutsideClick { get; set; } = true;
+
+    [Parameter]
+    public bool ShowHeader { get; set; } = true;
+
+    [Parameter]
+    public bool TriggerClose { get; set; }
+
+    private bool _previousTriggerClose;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (TriggerClose && !_previousTriggerClose)
+        {
+            await _act.Close();
+        }
+        _previousTriggerClose = TriggerClose;
+    }
+}

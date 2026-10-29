@@ -1,0 +1,752 @@
+﻿@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JSRuntime
+
+<div @ref="dropZoneRef"
+     class="@GetCssClass()"
+     data-drop-id="@DropId"
+     title="@(ShowAllowedFileTypes ? $"Supported: {string.Join(", ", AllowedFileTypes)} • Max size: {FormatFileSize(MaxFileSize)}" : null)">
+    <div class="flex items-center gap-2">
+        <svg class="h-5 w-5 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+        <span class="text-sm text-gray-600">Drop file or <span class="text-accent-600 font-semibold cursor-pointer" @onclick="TriggerFileBrowser">browse</span></span>
+    </div>
+
+    @if (ShowDropIndicator && _isDragOver)
+    {
+        <div class="drop-indicator">
+            <div class="drop-indicator-content" style="padding: 20px;">
+                <svg class="drop-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                          d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <span class="text-xs">Drop files here</span>
+            </div>
+        </div>
+    }
+
+    @if (ShowFileList && DroppedFiles.Any())
+    {
+        <div class="mt-2">
+            <span class="text-xs text-green-600">@DroppedFiles.Count file(s) uploaded</span>
+        </div>
+    }
+</div>
+
+<!-- Hidden file input for browsing -->
+<InputFile @ref="_inputFile"
+           OnChange="HandleFileBrowserSelection"
+           multiple="@AllowMultiple"
+           accept="@GetAcceptAttribute()"
+           style="display: none;" />
+
+<style>
+    .file-drop-wrapper {
+        transition: all 0.2s ease;
+    }
+
+        .file-drop-wrapper.drag-over {
+            position: relative;
+            background-color: rgba(59, 130, 246, 0.1) !important;
+            border: 2px dashed #3b82f6 !important;
+            border-radius: 0.5rem;
+        }
+
+    .drop-indicator {
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: rgba(59, 130, 246, 0.9);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 0.5rem;
+        z-index: 10;
+        padding: 16px;
+    }
+
+    .drop-indicator-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        color: white;
+        font-weight: 500;
+        font-size: 0.875rem;
+        text-align: center;
+        max-width: 100%;
+    }
+
+    .drop-icon {
+        width: 24px;
+        height: 24px;
+        margin-bottom: 4px;
+        flex-shrink: 0;
+    }
+</style>
+
+@code {
+    [Parameter] public string DropId { get; set; } = Guid.NewGuid().ToString();
+    [Parameter] public int? ComponentId { get; set; } = null;
+    [Parameter] public EventCallback<List<DroppedFileInfo>> OnFilesDropped { get; set; }
+    [Parameter] public EventCallback<List<DroppedFileWithContent>> OnFilesDroppedWithContent { get; set; }
+    [Parameter] public EventCallback<FileDropResult> OnFilesDroppedWithContentAndId { get; set; }
+    [Parameter] public EventCallback<List<DroppedFileInfo>> OnFilesChanged { get; set; }
+    [Parameter] public EventCallback OnBrowseClicked { get; set; }
+    [Parameter] public bool ShowDropIndicator { get; set; } = true;
+    [Parameter] public bool ShowFileList { get; set; } = true;
+    [Parameter] public bool AllowMultiple { get; set; } = true;
+    [Parameter] public bool AllowClear { get; set; } = true;
+    [Parameter] public bool AllowRemove { get; set; } = true;
+    [Parameter] public int MaxFileSize { get; set; } = 10 * 1024 * 1024; // 10MB
+    [Parameter] public string[] AllowedFileTypes { get; set; } = new[] { "PDF", "JPG", "JPEG", "PNG" };
+    [Parameter] public bool ReadFileContent { get; set; } = false;
+    [Parameter] public bool AutoClearOnDrop { get; set; } = false;
+    [Parameter] public string Label { get; set; } = "Drop files here";
+    [Parameter] public string SubLabel { get; set; } = " to upload to current folder";
+    [Parameter] public bool ShowAllowedFileTypes { get; set; } = true;
+
+    private ElementReference dropZoneRef;
+    private InputFile? _inputFile;
+    private DotNetObjectReference<FileDropZoneInline>? _dotNetRef;
+    private bool _isDragOver = false;
+    private List<DroppedFileInfo> DroppedFiles = new();
+
+    private readonly Dictionary<string, List<byte[]>> _fileChunks = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await InitializeJavaScript();
+        }
+    }
+
+    private async Task TriggerFileBrowser()
+    {
+        // Trigger custom callback if provided
+        if (OnBrowseClicked.HasDelegate)
+        {
+            await OnBrowseClicked.InvokeAsync();
+        }
+        else if (_inputFile != null)
+        {
+            // Trigger the specific InputFile for this component instance
+            await JSRuntime.InvokeVoidAsync("eval", $@"
+                var dropZone = document.querySelector('[data-drop-id=""{DropId}""]');
+                if (dropZone) {{
+                    var input = dropZone.parentElement.querySelector('input[type=""file""]');
+                    if (input) input.click();
+                }}
+            ");
+        }
+    }
+
+    private async Task HandleFileBrowserSelection(InputFileChangeEventArgs e)
+    {
+        var files = e.GetMultipleFiles(AllowMultiple ? 100 : 1);
+
+        if (AutoClearOnDrop)
+        {
+            DroppedFiles.Clear();
+        }
+
+        var validFiles = new List<DroppedFileWithContent>();
+
+        foreach (var file in files)
+        {
+            // Validate file size
+            if (file.Size > MaxFileSize)
+            {
+                Console.WriteLine($"File {file.Name} exceeds max size of {MaxFileSize} bytes");
+                continue;
+            }
+
+            // Validate file type - allows files without extensions (Outlook emails)
+            if (AllowedFileTypes != null && AllowedFileTypes.Length > 0)
+            {
+                var fileExtension = Path.GetExtension(file.Name);
+                if (!string.IsNullOrEmpty(fileExtension) &&
+                    !AllowedFileTypes.Any(ext => fileExtension.Equals($".{ext}", StringComparison.OrdinalIgnoreCase)))
+                {
+                    Console.WriteLine($"File {file.Name} has invalid extension: {fileExtension}");
+                    continue;
+                }
+            }
+
+            // Read file content if requested
+            if (ReadFileContent)
+            {
+                try
+                {
+                    using var memoryStream = new MemoryStream();
+                    await file.OpenReadStream(MaxFileSize).CopyToAsync(memoryStream);
+                    var bytes = memoryStream.ToArray();
+                    var base64 = Convert.ToBase64String(bytes);
+
+                    var fileWithContent = new DroppedFileWithContent
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        Name = file.Name,
+                        Size = file.Size,
+                        Type = file.ContentType,
+                        LastModified = file.LastModified.UtcDateTime,
+                        ContentBase64 = base64
+                    };
+
+                    validFiles.Add(fileWithContent);
+
+                    DroppedFiles.Add(new DroppedFileInfo
+                    {
+                        Id = fileWithContent.Id,
+                        Name = fileWithContent.Name,
+                        Size = fileWithContent.Size,
+                        Type = fileWithContent.Type,
+                        LastModified = fileWithContent.LastModified
+                    });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error reading file {file.Name}: {ex.Message}");
+                }
+            }
+            else
+            {
+                var fileInfo = new DroppedFileInfo
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    Name = file.Name,
+                    Size = file.Size,
+                    Type = file.ContentType,
+                    LastModified = file.LastModified.UtcDateTime
+                };
+
+                DroppedFiles.Add(fileInfo);
+            }
+        }
+
+        // Fire events
+        if (ReadFileContent && validFiles.Any())
+        {
+            // Call the callback with ID if it's registered and ComponentId is provided
+            if (OnFilesDroppedWithContentAndId.HasDelegate && ComponentId.HasValue)
+            {
+                await OnFilesDroppedWithContentAndId.InvokeAsync(new FileDropResult
+                {
+                    ComponentId = ComponentId.Value,
+                    Files = validFiles
+                });
+            }
+            else
+            {
+                await OnFilesDroppedWithContent.InvokeAsync(validFiles);
+            }
+        }
+
+        if (DroppedFiles.Any())
+        {
+            await OnFilesDropped.InvokeAsync(DroppedFiles);
+            await OnFilesChanged.InvokeAsync(DroppedFiles);
+        }
+
+        StateHasChanged();
+    }
+
+    private string GetAcceptAttribute()
+    {
+        if (AllowedFileTypes == null || AllowedFileTypes.Length == 0)
+        {
+            return "*";
+        }
+
+        // Convert to proper accept attribute format (e.g., ".pdf,.jpg,.png")
+        return string.Join(",", AllowedFileTypes.Select(ext =>
+            ext.StartsWith(".") ? ext : $".{ext}"));
+    }
+
+    private async Task InitializeJavaScript()
+    {
+        try
+        {
+            await JSRuntime.InvokeVoidAsync("eval", @"
+                if (!window.fileDropHelper) {
+                    window.fileDropHelper = {
+                        dropZones: new Map(),
+
+                        initialize: function (element, dotNetRef, dropId) {
+                            if (this.dropZones.has(dropId)) {
+                                this.dispose(dropId);
+                            }
+
+                            if (!element || typeof element.addEventListener !== 'function') {
+                                console.error('Invalid element passed to fileDropHelper.initialize');
+                                return;
+                            }
+
+                            const handlers = {
+                                dragenter: (e) => this.handleDragEnter(e, dotNetRef),
+                                dragover: (e) => this.handleDragOver(e, dotNetRef),
+                                dragleave: (e) => this.handleDragLeave(e, dotNetRef, element),
+                                drop: (e) => this.handleDrop(e, dotNetRef)
+                            };
+
+                            Object.entries(handlers).forEach(([event, handler]) => {
+                                element.addEventListener(event, handler);
+                            });
+
+                            this.dropZones.set(dropId, {
+                                element: element,
+                                dotNetRef: dotNetRef,
+                                handlers: handlers
+                            });
+                        },
+
+                        handleDragEnter: function (e, dotNetRef) {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            if (e.dataTransfer.types.includes('Files')) {
+                                dotNetRef.invokeMethodAsync('OnDragEnter');
+                            }
+                        },
+
+                        handleDragOver: function (e, dotNetRef) {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            if (e.dataTransfer.types.includes('Files')) {
+                                e.dataTransfer.dropEffect = 'copy';
+                            }
+                        },
+
+                        handleDragLeave: function (e, dotNetRef, element) {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            const rect = element.getBoundingClientRect();
+                            const x = e.clientX;
+                            const y = e.clientY;
+
+                            if (x < rect.left || x >= rect.right || y < rect.top || y >= rect.bottom) {
+                                dotNetRef.invokeMethodAsync('OnDragLeave');
+                            }
+                        },
+
+                        handleDrop: async function (e, dotNetRef) {
+                            e.preventDefault();
+                            e.stopPropagation();
+
+                            dotNetRef.invokeMethodAsync('OnDropStart');
+
+                            const files = Array.from(e.dataTransfer.files);
+
+                            if (files.length > 0) {
+                                try {
+                                    const shouldReadContent = await dotNetRef.invokeMethodAsync('ShouldReadFileContent');
+
+                                    if (shouldReadContent) {
+                                        for (const file of files) {
+                                            try {
+                                                const fileId = this.generateId();
+                                                await this.readFileInChunks(file, 64 * 1024, dotNetRef, fileId);
+                                            } catch (error) {
+                                                console.error('Error chunking file:', file.name, error);
+                                                await dotNetRef.invokeMethodAsync('OnFilesDrop', [{
+                                                    name: file.name,
+                                                    size: file.size,
+                                                    type: file.type,
+                                                    lastModified: new Date(file.lastModified),
+                                                    id: this.generateId()
+                                                }]);
+                                            }
+                                        }
+                                    } else {
+                                        const fileInfos = files.map(file => ({
+                                            name: file.name,
+                                            size: file.size,
+                                            type: file.type,
+                                            lastModified: new Date(file.lastModified),
+                                            id: this.generateId()
+                                        }));
+
+                                        await dotNetRef.invokeMethodAsync('OnFilesDrop', fileInfos);
+                                    }
+                                } catch (error) {
+                                    console.error('Error in handleDrop:', error);
+                                }
+                            }
+                        },
+
+                        readFileInChunks: function (file, chunkSize, dotNetRef, fileId) {
+                            return new Promise((resolve, reject) => {
+                                let offset = 0;
+                                const reader = new FileReader();
+
+                                reader.onload = async (e) => {
+                                    try {
+                                        const base64Chunk = e.target.result.split(',')[1];
+                                        const isLast = offset + chunkSize >= file.size;
+
+                                        await dotNetRef.invokeMethodAsync('ReceiveFileChunk',
+                                            fileId,
+                                            file.name,
+                                            file.size,
+                                            file.type,
+                                            file.lastModified,
+                                            base64Chunk,
+                                            isLast);
+
+                                        offset += chunkSize;
+                                        if (!isLast) {
+                                            readNextChunk();
+                                        } else {
+                                            resolve();
+                                        }
+                                    } catch (invokeError) {
+                                        reject(invokeError);
+                                    }
+                                };
+
+                                reader.onerror = (err) => reject(err);
+
+                                function readNextChunk() {
+                                    const slice = file.slice(offset, offset + chunkSize);
+                                    reader.readAsDataURL(slice);
+                                }
+
+                                readNextChunk();
+                            });
+                        },
+
+                        dispose: function (dropId) {
+                            const dropZone = this.dropZones.get(dropId);
+                            if (dropZone) {
+                                Object.entries(dropZone.handlers).forEach(([event, handler]) => {
+                                    dropZone.element.removeEventListener(event, handler);
+                                });
+
+                                this.dropZones.delete(dropId);
+                            }
+                        },
+
+                        generateId: function () {
+                            return 'file_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+                        }
+                    };
+                }
+            ");
+
+            await JSRuntime.InvokeVoidAsync("fileDropHelper.initialize", dropZoneRef, _dotNetRef, DropId);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error initializing JavaScript: {ex.Message}");
+        }
+    }
+
+    [JSInvokable]
+    public bool ShouldReadFileContent()
+    {
+        return ReadFileContent;
+    }
+
+    [JSInvokable]
+    public async Task OnDragEnter()
+    {
+        _isDragOver = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnDragLeave()
+    {
+        _isDragOver = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnDropStart()
+    {
+        _isDragOver = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task ReceiveFileChunk(
+        string fileId,
+        string name,
+        long size,
+        string type,
+        long lastModified,
+        string base64Chunk,
+        bool isLast)
+    {
+        if (!_fileChunks.ContainsKey(fileId))
+            _fileChunks[fileId] = new List<byte[]>();
+
+        byte[] chunkBytes;
+        try
+        {
+            chunkBytes = Convert.FromBase64String(base64Chunk);
+        }
+        catch (FormatException ex)
+        {
+            Console.WriteLine($"Invalid base64 chunk for file {fileId}: {ex.Message}");
+            return;
+        }
+
+        _fileChunks[fileId].Add(chunkBytes);
+
+        if (isLast)
+        {
+            try
+            {
+                var allBytes = _fileChunks[fileId].SelectMany(b => b).ToArray();
+                var fullBase64 = Convert.ToBase64String(allBytes);
+
+                var fileWithContent = new DroppedFileWithContent
+                {
+                    Id = fileId,
+                    Name = name,
+                    Size = size,
+                    Type = type,
+                    LastModified = DateTimeOffset.FromUnixTimeMilliseconds(lastModified).UtcDateTime,
+                    ContentBase64 = fullBase64
+                };
+
+                // File extension validation - allows files without extensions (Outlook emails)
+                var fileExtension = Path.GetExtension(name);
+                bool isValidType = AllowedFileTypes == null ||
+                                   AllowedFileTypes.Length == 0 ||
+                                   string.IsNullOrEmpty(fileExtension) ||
+                                   AllowedFileTypes.Any(ext => fileExtension.Equals($".{ext}", StringComparison.OrdinalIgnoreCase));
+
+                if (fileWithContent.Size <= MaxFileSize && isValidType)
+                {
+                    if (AutoClearOnDrop)
+                    {
+                        DroppedFiles.Clear();
+                    }
+
+                    if (!AllowMultiple && !AutoClearOnDrop)
+                    {
+                        DroppedFiles.Clear();
+                    }
+
+                    DroppedFiles.Add(new DroppedFileInfo
+                    {
+                        Id = fileWithContent.Id,
+                        Name = fileWithContent.Name,
+                        Size = fileWithContent.Size,
+                        Type = fileWithContent.Type,
+                        LastModified = fileWithContent.LastModified
+                    });
+
+                    // Call the callback with ID if it's registered and ComponentId is provided
+                    if (OnFilesDroppedWithContentAndId.HasDelegate && ComponentId.HasValue)
+                    {
+                        await OnFilesDroppedWithContentAndId.InvokeAsync(new FileDropResult
+                        {
+                            ComponentId = ComponentId.Value,
+                            Files = new List<DroppedFileWithContent> { fileWithContent }
+                        });
+                    }
+                    else
+                    {
+                        await OnFilesDroppedWithContent.InvokeAsync(new List<DroppedFileWithContent> { fileWithContent });
+                    }
+
+                    await OnFilesDropped.InvokeAsync(DroppedFiles);
+                    await OnFilesChanged.InvokeAsync(DroppedFiles);
+                    await InvokeAsync(StateHasChanged);
+                }
+                else
+                {
+                    Console.WriteLine($"File {fileWithContent.Name} rejected. Size: {fileWithContent.Size}, Max: {MaxFileSize}, Valid type: {isValidType}");
+                }
+            }
+            finally
+            {
+                _fileChunks.Remove(fileId);
+            }
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnFilesDrop(DroppedFileInfo[] files)
+    {
+        if (AutoClearOnDrop)
+        {
+            DroppedFiles.Clear();
+        }
+
+        var validFiles = new List<DroppedFileInfo>();
+
+        foreach (var file in files)
+        {
+            if (file.Size > MaxFileSize)
+            {
+                continue;
+            }
+
+            // File extension validation - allows files without extensions (Outlook emails)
+            if (AllowedFileTypes != null && AllowedFileTypes.Length > 0)
+            {
+                var fileExtension = Path.GetExtension(file.Name);
+                if (!string.IsNullOrEmpty(fileExtension) &&
+                    !AllowedFileTypes.Any(ext => fileExtension.Equals($".{ext}", StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+            }
+
+            validFiles.Add(file);
+        }
+
+        if (!AllowMultiple && !AutoClearOnDrop)
+        {
+            DroppedFiles.Clear();
+            if (validFiles.Any())
+            {
+                DroppedFiles.Add(validFiles.First());
+            }
+        }
+        else
+        {
+            DroppedFiles.AddRange(validFiles);
+        }
+
+        if (validFiles.Any() || AutoClearOnDrop)
+        {
+            await OnFilesDropped.InvokeAsync(DroppedFiles);
+            await OnFilesChanged.InvokeAsync(DroppedFiles);
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearFiles()
+    {
+        DroppedFiles.Clear();
+        await OnFilesChanged.InvokeAsync(DroppedFiles);
+        StateHasChanged();
+    }
+
+    private async Task RemoveFile(DroppedFileInfo file)
+    {
+        DroppedFiles.Remove(file);
+        await OnFilesChanged.InvokeAsync(DroppedFiles);
+        StateHasChanged();
+    }
+
+    private string GetCssClass()
+    {
+        var classes = new List<string> { "file-drop-wrapper", "border-2", "border-dashed", "border-gray-300", "rounded-lg", "px-6", "py-3", "text-center", "hover:border-accent-400", "hover:bg-accent-50", "transition-colors", "cursor-pointer" };
+
+        if (_isDragOver)
+        {
+            classes.Add("drag-over");
+        }
+
+        return string.Join(" ", classes);
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        string[] suffixes = { "B", "KB", "MB", "GB" };
+        int counter = 0;
+        decimal number = bytes;
+        while (Math.Round(number / 1024) >= 1)
+        {
+            number /= 1024;
+            counter++;
+        }
+        return $"{number:n1} {suffixes[counter]}";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_dotNetRef != null)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("fileDropHelper.dispose", DropId);
+            }
+            catch
+            {
+                // Ignore errors during disposal
+            }
+            _dotNetRef?.Dispose();
+        }
+    }
+
+    public class DroppedFileInfo
+    {
+        public string Name { get; set; } = "";
+        public long Size { get; set; }
+        public string Type { get; set; } = "";
+        public DateTime LastModified { get; set; }
+        public string Id { get; set; } = Guid.NewGuid().ToString();
+    }
+
+    public class DroppedFileWithContent : DroppedFileInfo
+    {
+        public string ContentBase64 { get; set; } = "";
+    }
+
+    public class FileDropResult
+    {
+        public int ComponentId { get; set; }
+        public List<DroppedFileWithContent> Files { get; set; } = new();
+    }
+}
+
+@* 
+USAGE EXAMPLES:
+
+1. With built-in file browser (automatic) - WITHOUT ComponentId:
+<FileDropZoneInline OnFilesDroppedWithContent="@HandleFileDropWithContent"
+              ReadFileContent="true"
+              AutoClearOnDrop="true"
+              ShowFileList="false" />
+
+2. With ComponentId - NEW:
+<FileDropZoneInline ComponentId="@myChecklistItemId"
+              OnFilesDroppedWithContentAndId="@HandleFileDropWithContentAndId"
+              ReadFileContent="true"
+              AutoClearOnDrop="true"
+              ShowFileList="false" />
+
+3. With custom browse callback:
+<FileDropZoneInline OnFilesDroppedWithContent="@HandleFileDropWithContent"
+              OnBrowseClicked="@HandleBrowseClick"
+              ReadFileContent="true"
+              AutoClearOnDrop="true"
+              ShowFileList="false" />
+
+@code {
+    private int myChecklistItemId = 123;
+
+    private async Task HandleBrowseClick()
+    {
+        // Your custom file browse logic here
+        // If not provided, the built-in InputFile browser will be used
+    }
+
+    private async Task HandleFileDropWithContent(List<FileDropZoneInline.DroppedFileWithContent> files)
+    {
+        // Handle dropped or browsed files with content (without ID)
+    }
+
+    private async Task HandleFileDropWithContentAndId(FileDropZoneInline.FileDropResult result)
+    {
+        // Handle dropped or browsed files with content AND the component ID
+        Console.WriteLine($"Files dropped for component: {result.ComponentId}");
+        // Process result.Files
+    }
+}
+*@

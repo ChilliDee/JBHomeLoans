@@ -1,0 +1,608 @@
+﻿@* MonthlyLineChart.razor *@
+
+<div class="bg-white overflow-hidden">
+    <!-- Time Period Toggle and Cutoff Time Controls -->
+    <div class="px-6 py-4 bg-white border-b border-gray-200">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-xl font-semibold text-gray-900">@Title</h2>
+            <div class="flex rounded-lg border border-gray-300 overflow-hidden">
+                <button type="button"
+                        class="@GetToggleButtonClass(TimePeriod.Day)"
+                        @onclick="() => SetTimePeriod(TimePeriod.Day)">
+                    Day
+                </button>
+                <button type="button"
+                        class="@GetToggleButtonClass(TimePeriod.Week)"
+                        @onclick="() => SetTimePeriod(TimePeriod.Week)">
+                    Week
+                </button>
+                <button type="button"
+                        class="@GetToggleButtonClass(TimePeriod.Month)"
+                        @onclick="() => SetTimePeriod(TimePeriod.Month)">
+                    Month
+                </button>
+            </div>
+        </div>
+
+        <!-- Cutoff Time Filter -->
+        <div class="flex items-center gap-4">
+            <label class="flex items-center gap-2">
+                <input type="checkbox"
+                       class="w-4 h-4 text-accent-600 border-gray-300 rounded focus:ring-accent-500"
+                       @bind="UseCutoffTime"
+                       @bind:after="OnCutoffToggleChanged" />
+                <span class="text-sm font-medium text-gray-700">Enable Daily Cutoff Time</span>
+            </label>
+
+            @if (UseCutoffTime)
+            {
+                <div class="flex items-center gap-2">
+                    <label class="text-sm text-gray-600">Cutoff Time:</label>
+                    <input type="time"
+                           class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-accent-500 focus:border-accent-500"
+                           value="@CutoffTimeInput"
+                           @onchange="@((ChangeEventArgs e) => OnCutoffTimeChanged(e.Value?.ToString()))" />
+                    <button type="button"
+                            class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                            @onclick="ClearCutoffTime">
+                        Clear
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+        <div class="grid grid-cols-5 gap-4">
+            <div class="bg-accent-50 p-4 rounded-lg border border-accent-200">
+                <h3 class="text-sm font-medium text-accent-800">Total Records</h3>
+                <p class="text-2xl font-bold text-accent-900">@TotalCount.ToString("N0")</p>
+                @if (NullCount > 0)
+                {
+                    <p class="text-xs text-accent-600 mt-1">@NullCount null values excluded</p>
+                }
+                @if (ExcludedByCutoffCount > 0)
+                {
+                    <p class="text-xs text-accent-600 mt-1">@ExcludedByCutoffCount excluded by cutoff time</p>
+                }
+                @if (TotalInputCount != TotalCount)
+                {
+                    <p class="text-xs text-gray-500 mt-1">@TotalInputCount total input records</p>
+                }
+            </div>
+            <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                <h3 class="text-sm font-medium text-green-800">@GetAverageLabel() Average</h3>
+                <p class="text-2xl font-bold text-green-900">@AverageCount</p>
+            </div>
+            <div class="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                <h3 class="text-sm font-medium text-orange-800">Peak @GetPeriodLabel()</h3>
+                <p class="text-2xl font-bold text-orange-900">@MaxCount</p>
+            </div>
+            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-800">Lowest @GetPeriodLabel()</h3>
+                <p class="text-2xl font-bold text-gray-900">@MinCount</p>
+            </div>
+            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-800">Count Of @GetPeriodLabel()s</h3>
+                <p class="text-2xl font-bold text-gray-900">@ChartData.Count</p>
+            </div>
+        </div>
+    </div>
+
+    @if (UseCutoffTime && ActiveCutoffTime.HasValue)
+    {
+        <div class="px-6 py-2 bg-yellow-50 border-b border-yellow-200">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <svg class="w-4 h-4 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd" />
+                    </svg>
+                    <p class="text-sm text-yellow-800">
+                        <span class="font-medium">Time Cutoff Active:</span> Only showing records before @ActiveCutoffTime.Value.ToString(@"hh\:mm") each day
+                    </p>
+                </div>
+                @if (ExcludedByCutoffCount > 0)
+                {
+                    <p class="text-sm text-yellow-700">
+                        (@ExcludedByCutoffCount records excluded)
+                    </p>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- Chart Container -->
+    <div class="p-6">
+        @if (ChartData.Any())
+        {
+            <div class="w-full" style="height: 400px;">
+                <svg width="100%" height="100%" viewBox="0 0 100 25" preserveAspectRatio="none" class="border border-gray-200 rounded-lg bg-white"
+                     role="img" aria-label="@GetChartLabel()">
+                    <!-- Grid Lines -->
+                    @for (int i = 0; i <= 10; i++)
+                    {
+                        var y = 3 + (i * 1.9);
+                        <line x1="8" y1="@y" x2="95" y2="@y" stroke="#f0f0f0" stroke-dasharray="0.2,0.2" />
+                    }
+
+                    @for (int i = 0; i < ChartData.Count; i++)
+                    {
+                        var x = 8 + (i * (87.0 / Math.Max(ChartData.Count - 1, 1)));
+                        <line x1="@x" y1="3" x2="@x" y2="22" stroke="#f0f0f0" stroke-dasharray="0.2,0.2" />
+                    }
+
+                    <!-- Y-Axis Labels -->
+                    @for (int i = 0; i <= 10; i++)
+                    {
+                        var y = 22.1 - (i * 1.9);
+                        var value = (int)(MaxCount * i / 10.0);
+                        <svg:text x="6.5" y="@y" font-size="0.8" fill="#6b7280" text-anchor="end">@value</svg:text>
+                    }
+
+                    <!-- X-Axis Labels -->
+                    @for (int i = 0; i < ChartData.Count; i++)
+                    {
+                        var x = 8 + (i * (87.0 / Math.Max(ChartData.Count - 1, 1)));
+                        if (ChartData.Count > 6)
+                        {
+                            <svg:text x="@x" y="23.5" font-size="0.6" fill="#6b7280" text-anchor="end" transform="rotate(-45 @x 23.5)">@ChartData[i].PeriodName</svg:text>
+                        }
+                        else
+                        {
+                            <svg:text x="@x" y="23.5" font-size="0.6" fill="#6b7280" text-anchor="middle">@ChartData[i].PeriodName</svg:text>
+                        }
+                    }
+
+                    <!-- Y-Axis Title -->
+                    <text x="1" y="12.5" font-size="0.8" fill="#6b7280" text-anchor="middle" transform="rotate(-90 1 12.5)">Count</text>
+
+                    <!-- Line Path -->
+                    <path d="@GenerateLinePath()" stroke="#2563eb" stroke-width="0.2" fill="none" />
+
+                    <!-- Data Points with Tooltip -->
+                    @for (int i = 0; i < ChartData.Count; i++)
+                    {
+                        var point = GetPointCoordinates(i);
+                        <circle cx="@point.X" cy="@point.Y" r="0.3" fill="#2563eb" stroke="white" stroke-width="0.1"
+                                class="hover:r-7 transition-all cursor-pointer"
+                                @onmouseover="@(() => ShowTooltip(i, point.X, point.Y))"
+                                @onmouseout="@HideTooltip">
+                            <title>@ChartData[i].PeriodName: @ChartData[i].Count</title>
+                        </circle>
+                    }
+
+                    <!-- Axes Lines -->
+                    <line x1="8" y1="3" x2="8" y2="22" stroke="#6b7280" stroke-width="0.05" />
+                    <line x1="8" y1="22" x2="95" y2="22" stroke="#6b7280" stroke-width="0.05" />
+
+                    @if (TooltipVisible)
+                    {
+                        <rect x="@TooltipX" y="@TooltipY" width="8" height="2.5" fill="#fff" stroke="#2563eb" rx="0.3" />
+                        <svg:text x="@TooltipX+0.5" y="@TooltipY+1.5" font-size="0.8" fill="#2563eb">
+                            @TooltipText
+                        </svg:text>
+                    }
+                </svg>
+            </div>
+        }
+        else
+        {
+            <div class="flex items-center justify-center h-96 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                <div class="text-center">
+                    <svg class="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M7 12l3-3 3 3 4-4M8 21l4-4 4 4M3 4h18M4 4h16v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4z"></path>
+                    </svg>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
+                    <p class="text-sm text-gray-500">@GetEmptyStateMessage()</p>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Recent Periods Summary -->
+    @if (ChartData.Any())
+    {
+        <div class="px-6 pb-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Recent @GetPeriodLabel()s</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                @foreach (var period in ChartData.TakeLast(6))
+                {
+                    <div class="text-center p-3 bg-gray-50 rounded-lg">
+                        <h4 class="text-xs font-medium text-gray-600 mb-1">@period.PeriodName</h4>
+                        <p class="text-lg font-bold text-gray-900">@period.Count</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    <!-- Day of Week Breakdown -->
+    @if (ValidDateTimes.Any())
+    {
+        <div class="px-6 pb-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Breakdown by Day of Week</h3>
+            <div class="grid grid-cols-7 gap-3">
+                @foreach (var dayData in GetDayOfWeekBreakdown())
+                {
+                    var isWeekend = dayData.DayOfWeek == DayOfWeek.Saturday || dayData.DayOfWeek == DayOfWeek.Sunday;
+                    var bgColor = isWeekend ? "bg-accent-50" : "bg-gray-50";
+                    var borderColor = isWeekend ? "border-accent-200" : "border-gray-200";
+                    var textColor = isWeekend ? "text-accent-600" : "text-gray-600";
+
+                    <div class="text-center p-3 @bgColor rounded-lg border @borderColor">
+                        <h4 class="text-xs font-medium @textColor mb-1">@dayData.DayName</h4>
+                        <p class="text-2xl font-bold text-gray-900">@dayData.Count</p>
+                        <p class="text-xs text-gray-500 mt-1">@dayData.Percentage.ToString("F1")%</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<DateTime?> NullableDateTimeCollection { get; set; } = new();
+    [Parameter] public List<DateTime> DateTimeCollection { get; set; } = new();
+    [Parameter] public string Title { get; set; } = "Data Trends";
+    [Parameter] public TimePeriod DefaultTimePeriod { get; set; } = TimePeriod.Month;
+
+    // Cutoff time state
+    private bool UseCutoffTime { get; set; } = false;
+    private string CutoffTimeInput { get; set; } = "17:00";
+    private TimeSpan? ActiveCutoffTime { get; set; } = null;
+
+    public enum TimePeriod
+    {
+        Day,
+        Week,
+        Month
+    }
+
+    public class PeriodData
+    {
+        public string PeriodName { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public DateTime Date { get; set; }
+    }
+
+    public class DayOfWeekData
+    {
+        public string DayName { get; set; } = string.Empty;
+        public DayOfWeek DayOfWeek { get; set; }
+        public int Count { get; set; }
+        public double Percentage { get; set; }
+    }
+
+    private TimePeriod _currentTimePeriod;
+    private List<PeriodData> ChartData { get; set; } = new();
+    private int ExcludedByCutoffCount { get; set; }
+
+    // Combine both collections and filter valid dates
+    private List<DateTime> ValidDateTimes
+    {
+        get
+        {
+            var validDates = new List<DateTime>();
+
+            // Add non-nullable collection
+            if (DateTimeCollection?.Any() == true)
+            {
+                validDates.AddRange(DateTimeCollection);
+            }
+
+            // Add valid dates from nullable collection
+            if (NullableDateTimeCollection?.Any() == true)
+            {
+                validDates.AddRange(NullableDateTimeCollection.Where(dt => dt.HasValue).Select(dt => dt.Value));
+            }
+
+            // Apply cutoff time filter if enabled and specified
+            if (UseCutoffTime && ActiveCutoffTime.HasValue)
+            {
+                var beforeCutoff = validDates.Where(dt => dt.TimeOfDay <= ActiveCutoffTime.Value).ToList();
+                ExcludedByCutoffCount = validDates.Count - beforeCutoff.Count;
+                return beforeCutoff;
+            }
+
+            ExcludedByCutoffCount = 0;
+            return validDates;
+        }
+    }
+
+    private int NullCount => NullableDateTimeCollection?.Count(dt => !dt.HasValue) ?? 0;
+    private int TotalInputCount => (DateTimeCollection?.Count ?? 0) + (NullableDateTimeCollection?.Count ?? 0);
+    private int TotalCount => ChartData.Sum(x => x.Count);
+    private int AverageCount => ChartData.Any() ? (int)Math.Round(ChartData.Average(x => x.Count)) : 0;
+    private int MaxCount => ChartData.Any() ? ChartData.Max(x => x.Count) : 0;
+    private int MinCount => ChartData.Any() ? ChartData.Min(x => x.Count) : 0;
+
+    // Tooltip state
+    private bool TooltipVisible { get; set; }
+    private double TooltipX { get; set; }
+    private double TooltipY { get; set; }
+    private string TooltipText { get; set; } = "";
+
+    protected override void OnInitialized()
+    {
+        _currentTimePeriod = DefaultTimePeriod;
+    }
+
+    protected override void OnParametersSet()
+    {
+        ProcessDateTimeCollection();
+    }
+
+    private void SetTimePeriod(TimePeriod period)
+    {
+        _currentTimePeriod = period;
+        ProcessDateTimeCollection();
+    }
+
+    private string GetToggleButtonClass(TimePeriod period)
+    {
+        var baseClass = "px-4 py-2 text-sm font-medium transition-colors";
+        return period == _currentTimePeriod
+            ? $"{baseClass} bg-accent-600 text-white"
+            : $"{baseClass} bg-white text-gray-700 hover:bg-gray-50";
+    }
+
+    private string GetPeriodLabel()
+    {
+        return _currentTimePeriod switch
+        {
+            TimePeriod.Day => "Day",
+            TimePeriod.Week => "Week",
+            TimePeriod.Month => "Month",
+            _ => "Period"
+        };
+    }
+
+    private string GetAverageLabel()
+    {
+        return _currentTimePeriod switch
+        {
+            TimePeriod.Day => "Daily",
+            TimePeriod.Week => "Weekly",
+            TimePeriod.Month => "Monthly",
+            _ => "Period"
+        };
+    }
+
+    private string GetChartLabel()
+    {
+        return _currentTimePeriod switch
+        {
+            TimePeriod.Day => "Daily Data Trends Line Chart",
+            TimePeriod.Week => "Weekly Data Trends Line Chart",
+            TimePeriod.Month => "Monthly Data Trends Line Chart",
+            _ => "Data Trends Line Chart"
+        };
+    }
+
+    private string GetEmptyStateMessage()
+    {
+        bool hasNullableCollection = NullableDateTimeCollection?.Any() == true;
+        bool hasNonNullableCollection = DateTimeCollection?.Any() == true;
+
+        if (!hasNullableCollection && !hasNonNullableCollection)
+        {
+            return "Provide a collection of DateTimes to display the chart";
+        }
+
+        if (hasNullableCollection && NullCount == NullableDateTimeCollection.Count && !hasNonNullableCollection)
+        {
+            return "All DateTime values are null - no data to display";
+        }
+
+        if (UseCutoffTime && ActiveCutoffTime.HasValue && ExcludedByCutoffCount > 0)
+        {
+            return $"All records excluded by cutoff time ({ActiveCutoffTime.Value:hh\\:mm})";
+        }
+
+        return "No valid DateTime values found to display";
+    }
+
+    private List<DayOfWeekData> GetDayOfWeekBreakdown()
+    {
+        var validDates = ValidDateTimes;
+
+        if (!validDates.Any())
+            return new List<DayOfWeekData>();
+
+        var totalCount = validDates.Count;
+
+        // Get all days of week in order (Monday to Sunday)
+        var daysOfWeek = new[]
+        {
+            DayOfWeek.Monday,
+            DayOfWeek.Tuesday,
+            DayOfWeek.Wednesday,
+            DayOfWeek.Thursday,
+            DayOfWeek.Friday,
+            DayOfWeek.Saturday,
+            DayOfWeek.Sunday
+        };
+
+        var breakdown = daysOfWeek.Select(day =>
+        {
+            var count = validDates.Count(dt => dt.DayOfWeek == day);
+            var percentage = totalCount > 0 ? (count * 100.0 / totalCount) : 0;
+
+            return new DayOfWeekData
+                {
+                    DayName = day.ToString().Substring(0, 3), // Mon, Tue, Wed, etc.
+                    DayOfWeek = day,
+                    Count = count,
+                    Percentage = percentage
+                };
+        }).ToList();
+
+        return breakdown;
+    }
+
+    private void ProcessDateTimeCollection()
+    {
+        var validDates = ValidDateTimes;
+
+        if (!validDates.Any())
+        {
+            ChartData = new List<PeriodData>();
+            return;
+        }
+
+        var periodCounts = _currentTimePeriod switch
+        {
+            TimePeriod.Day => GroupByDay(validDates),
+            TimePeriod.Week => GroupByWeek(validDates),
+            TimePeriod.Month => GroupByMonth(validDates),
+            _ => GroupByMonth(validDates)
+        };
+
+        // Limit to 100 points for performance
+        ChartData = periodCounts.Count > 100
+            ? periodCounts.Skip(periodCounts.Count - 100).ToList()
+            : periodCounts;
+    }
+
+    private List<PeriodData> GroupByDay(List<DateTime> dateTimes)
+    {
+        return dateTimes
+            .GroupBy(dt => dt.Date)
+            .Select(g => new PeriodData
+                {
+                    PeriodName = g.Key.ToString("MMM dd"),
+                    Count = g.Count(),
+                    Date = g.Key
+                })
+            .OrderBy(x => x.Date)
+            .ToList();
+    }
+
+    private List<PeriodData> GroupByWeek(List<DateTime> dateTimes)
+    {
+        return dateTimes
+            .GroupBy(dt => GetWeekStart(dt))
+            .Select(g => new PeriodData
+                {
+                    PeriodName = $"Week {GetWeekOfYear(g.Key)}",
+                    Count = g.Count(),
+                    Date = g.Key
+                })
+            .OrderBy(x => x.Date)
+            .ToList();
+    }
+
+    private List<PeriodData> GroupByMonth(List<DateTime> dateTimes)
+    {
+        return dateTimes
+            .GroupBy(dt => new { dt.Year, dt.Month })
+            .Select(g => new PeriodData
+                {
+                    PeriodName = new DateTime(g.Key.Year, g.Key.Month, 1).ToString("MMM yyyy"),
+                    Count = g.Count(),
+                    Date = new DateTime(g.Key.Year, g.Key.Month, 1)
+                })
+            .OrderBy(x => x.Date)
+            .ToList();
+    }
+
+    private DateTime GetWeekStart(DateTime date)
+    {
+        int diff = (7 + (date.DayOfWeek - DayOfWeek.Monday)) % 7;
+        return date.AddDays(-1 * diff).Date;
+    }
+
+    private int GetWeekOfYear(DateTime date)
+    {
+        var culture = System.Globalization.CultureInfo.CurrentCulture;
+        var calendar = culture.Calendar;
+        return calendar.GetWeekOfYear(date, culture.DateTimeFormat.CalendarWeekRule, culture.DateTimeFormat.FirstDayOfWeek);
+    }
+
+    private string GenerateLinePath()
+    {
+        if (!ChartData.Any()) return "";
+
+        var pathCommands = new List<string>();
+
+        for (int i = 0; i < ChartData.Count; i++)
+        {
+            var point = GetPointCoordinates(i);
+            var command = i == 0 ? $"M {point.X} {point.Y}" : $"L {point.X} {point.Y}";
+            pathCommands.Add(command);
+        }
+
+        return string.Join(" ", pathCommands);
+    }
+
+    private (double X, double Y) GetPointCoordinates(int index)
+    {
+        if (!ChartData.Any()) return (0, 0);
+
+        var x = 8 + (index * (87.0 / Math.Max(ChartData.Count - 1, 1)));
+        var normalizedValue = MaxCount > 0 ? (double)ChartData[index].Count / MaxCount : 0;
+        var y = 22 - (normalizedValue * 19); // 19 is the chart height (22-3)
+
+        return (x, y);
+    }
+
+    private void ShowTooltip(int index, double x, double y)
+    {
+        if (index < 0 || index >= ChartData.Count)
+            return;
+
+        TooltipVisible = true;
+        TooltipX = x + 0.5;
+        TooltipY = y - 3;
+        TooltipText = $"{ChartData[index].PeriodName}: {ChartData[index].Count}";
+        StateHasChanged();
+    }
+
+    private void HideTooltip()
+    {
+        TooltipVisible = false;
+        StateHasChanged();
+    }
+
+    private void OnCutoffToggleChanged()
+    {
+        if (UseCutoffTime)
+        {
+            // Parse the input time when enabling
+            if (TimeSpan.TryParse(CutoffTimeInput, out var time))
+            {
+                ActiveCutoffTime = time;
+            }
+        }
+        else
+        {
+            // Clear the active cutoff when disabling
+            ActiveCutoffTime = null;
+        }
+
+        ProcessDateTimeCollection();
+    }
+
+    private void OnCutoffTimeChanged(string? timeString)
+    {
+        if (string.IsNullOrEmpty(timeString))
+            return;
+
+        CutoffTimeInput = timeString;
+
+        if (TimeSpan.TryParse(timeString, out var time))
+        {
+            ActiveCutoffTime = time;
+            ProcessDateTimeCollection();
+        }
+    }
+
+    private void ClearCutoffTime()
+    {
+        UseCutoffTime = false;
+        ActiveCutoffTime = null;
+        CutoffTimeInput = "17:00";
+        ProcessDateTimeCollection();
+    }
+}

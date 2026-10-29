@@ -1,0 +1,197 @@
+﻿@using Microsoft.AspNetCore.Components
+@using System.ComponentModel
+@implements IDisposable
+
+<div class="relative">
+
+    @if (!string.IsNullOrWhiteSpace(Label))
+    {
+        if (LabelPlacement == "floating")
+        {
+            <label class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+                @Label
+            </label>
+        }
+        else
+        {
+            <div class="mb-1">
+                <label class="inline-block text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+                    @Label
+                </label>
+            </div>
+        }
+    }
+
+    <div class="block w-full rounded-md @(IsDisabled ? "bg-gray-50" : "bg-white") px-3 py-1.5 text-base text-gray-900 sm:text-sm/6 min-h-[38px] @GetContainerClasses()">
+        <div class="flex items-center gap-4 mt-1 relative">
+
+            <label class="flex items-center gap-2 @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer")">
+                <input type="radio"
+                       name="@Name"
+                       id="@($"{Id}_yes")"
+                       disabled="@IsDisabled"
+                       checked="@(Value == true)"
+                       @onchange="@(() => SetValue(true))"
+                       class="@GetRadioClasses()" />
+                <span class="@GetLabelTextClasses()">@PositiveLabel</span>
+            </label>
+
+            <label class="flex items-center gap-2 @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer")">
+                <input type="radio"
+                       name="@Name"
+                       id="@($"{Id}_no")"
+                       disabled="@IsDisabled"
+                       checked="@(Value == false)"
+                       @onchange="@(() => SetValue(false))"
+                       class="@GetRadioClasses()" />
+                <span class="@GetLabelTextClasses()">@NegativeLabel</span>
+            </label>
+
+            @if (Value.HasValue && ShowClearButton)
+            {
+                <button type="button"
+                        @onclick="ClearValue"
+                        disabled="@IsDisabled"
+                        title="Clear selection"
+                        class="@GetClearButtonClasses()">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-3 text-red-400">
+                        <path fill-rule="evenodd" d="M10 8.586 4.929 3.515a1 1 0 0 0-1.414 1.414L8.586 10l-5.071 5.071a1 1 0 1 0 1.414 1.414L10 11.414l5.071 5.071a1 1 0 0 0 1.414-1.414L11.414 10l5.071-5.071a1 1 0 0 0-1.414-1.414L10 8.586Z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            }
+
+            @if (!string.IsNullOrEmpty(Description))
+            {
+                <p class="text-xs @(IsDisabled ? "text-gray-400" : "text-gray-500") ml-auto">@Description</p>
+            }
+
+        </div>
+    </div>
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool? Value { get; set; }
+    [Parameter] public EventCallback<bool?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? OnChange { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public string LabelPlacement { get; set; } = "floating";
+    [Parameter] public string PositiveLabel { get; set; } = "Yes";
+    [Parameter] public string NegativeLabel { get; set; } = "No";
+    [Parameter] public bool ShowClearButton { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    /// <summary>
+    /// Pass your code-behind RemoveValidator method here. The component removes
+    /// its own Validate method from your list on dispose.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationUnref { get; set; }
+
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        ValidationRef?.Invoke(Validate);
+        base.OnInitialized();
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && Value is null)
+        {
+            isInvalid = true;
+            errorMessage = "This field is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private async Task SetValue(bool newValue)
+    {
+        if (IsDisabled) return;
+
+        Value = newValue;
+        isInvalid = false;
+        errorMessage = string.Empty;
+        await ValueChanged.InvokeAsync(newValue);
+
+        if (OnChange != null)
+            await OnChange();
+    }
+
+    private string GetRadioClasses()
+    {
+        var baseClasses = "size-4 border-gray-300 focus:ring-2 focus:ring-accent-600";
+        return IsDisabled
+            ? $"{baseClasses} text-accent-300 cursor-not-allowed"
+            : $"{baseClasses} text-accent-600 cursor-pointer";
+    }
+
+    private string GetLabelTextClasses()
+    {
+        return IsDisabled ? "text-sm font-medium text-gray-500" : "text-sm font-medium text-gray-900";
+    }
+
+    private string GetContainerClasses()
+    {
+        if (IsDisabled)
+            return "outline outline-1 -outline-offset-1 outline-gray-200";
+
+        if (Highlight)
+            return "outline outline-2 -outline-offset-1 outline-amber-500";
+
+        if (isInvalid)
+            return "outline outline-1 -outline-offset-1 outline-red-500";
+
+        return "outline outline-1 -outline-offset-1 outline-gray-300";
+    }
+
+    private async Task ClearValue()
+    {
+        if (IsDisabled) return;
+
+        Value = null;
+        isInvalid = false;
+        errorMessage = string.Empty;
+        await ValueChanged.InvokeAsync(null);
+
+        if (OnChange != null)
+            await OnChange();
+    }
+
+    private string GetClearButtonClasses()
+    {
+        var baseClasses = "inline-flex items-center justify-center rounded-full p-2 right-0 absolute";
+        return IsDisabled
+            ? $"{baseClasses} text-gray-300 cursor-not-allowed"
+            : $"{baseClasses} text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer";
+    }
+
+    public void Dispose()
+    {
+        ValidationUnref?.Invoke(Validate);
+    }
+}

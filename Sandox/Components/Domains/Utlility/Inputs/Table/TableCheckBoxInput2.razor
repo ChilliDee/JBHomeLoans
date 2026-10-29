@@ -1,0 +1,179 @@
+﻿@using Microsoft.AspNetCore.Components
+@implements IDisposable
+
+<div class="flex flex-col gap-2">
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <span class="text-xs font-semibold uppercase tracking-wide @(IsDisabled ? "text-gray-300" : "text-gray-400")">
+            @Label
+        </span>
+    }
+
+    <div class="flex items-center gap-3">
+        <!-- Toggle Switch -->
+        <button type="button"
+                id="@Id"
+                name="@Name"
+                disabled="@IsDisabled"
+                @onclick="ToggleValue"
+                class="@GetSwitchClasses()"
+                role="switch"
+                aria-checked="@GetAriaChecked()">
+            <span class="sr-only">@CheckboxText</span>
+            <span class="@GetToggleClasses()">
+                <!-- False/Off Icon (X) -->
+                <span class="@GetOffIconClasses()" aria-hidden="true">
+                    <svg class="size-3 @(IsDisabled ? "text-gray-300" : "text-gray-400")" fill="none" viewBox="0 0 12 12">
+                        <path d="M4 8l2-2m0 0l2-2M6 6L4 4m2 2l2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+                    </svg>
+                </span>
+
+                <!-- True/On Icon (Checkmark) -->
+                <span class="@GetOnIconClasses()" aria-hidden="true">
+                    <svg class="size-3 @(IsDisabled ? "text-accent-400" : "text-accent-600")" fill="currentColor" viewBox="0 0 12 12">
+                        <path d="M3.707 5.293a1 1 0 00-1.414 1.414l1.414-1.414zM5 8l-.707.707a1 1 0 001.414 0L5 8zm4.707-3.293a1 1 0 00-1.414-1.414l1.414 1.414zm-7.414 2l2 2 1.414-1.414-2-2-1.414 1.414zm3.414 2l4-4-1.414-1.414-4 4 1.414 1.414z"></path>
+                    </svg>
+                </span>
+            </span>
+        </button>
+
+        <!-- Label and description -->
+        <div class="flex-1">
+            <span class="@GetLabelTextClasses() @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer") select-none"
+                  @onclick="ToggleValue">
+                @CheckboxText
+            </span>
+            @if (!string.IsNullOrEmpty(Description))
+            {
+                <p class="text-xs @(IsDisabled ? "text-gray-300" : "text-gray-400") mt-0.5">@Description</p>
+            }
+        </div>
+
+        <!-- State Indicator -->
+        @if (ShowStateIndicator)
+        {
+            <span class="text-xs font-semibold uppercase tracking-wide @GetStateTextClasses()">
+                @GetStateText()
+            </span>
+        }
+    </div>
+</div>
+
+@code {
+    // ── Nullable bool binding ────────────────────────────────────────────
+    [Parameter] public bool? NullBool { get; set; }
+    [Parameter] public bool? Value { get; set; }
+    [Parameter] public EventCallback<bool?> NullBoolChanged { get; set; }
+
+    // ── Non-nullable bool binding ────────────────────────────────────────
+    [Parameter] public bool NonNullBool { get; set; }
+    [Parameter] public EventCallback<bool> NonNullBoolChanged { get; set; }
+
+    // ── Shared parameters ────────────────────────────────────────────────
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string CheckboxText { get; set; } = string.Empty;
+    [Parameter] public string Description { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public bool ShowStateIndicator { get; set; } = false;
+    [Parameter] public bool DefaultToFalse { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    // ── True when the caller bound a non-nullable bool ───────────────────
+    private bool IsNonNullableBinding => NonNullBoolChanged.HasDelegate;
+
+    // ── Resolved current value regardless of binding mode ───────────────
+    private bool ResolvedValue
+    {
+        get
+        {
+            if (IsNonNullableBinding)
+                return NonNullBool;
+
+            return NullBool ?? (DefaultToFalse ? false : true);
+        }
+    }
+
+    // ── Combined disabled state ──────────────────────────────────────────
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+    }
+
+    private async Task ToggleValue()
+    {
+        if (IsDisabled) return;
+
+        bool newValue = !ResolvedValue;
+
+        if (IsNonNullableBinding)
+        {
+            NonNullBool = newValue;
+            await NonNullBoolChanged.InvokeAsync(newValue);
+        }
+        else
+        {
+            NullBool = newValue;
+            await NullBoolChanged.InvokeAsync(newValue);
+        }
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack.Invoke();
+    }
+
+    private string GetSwitchClasses()
+    {
+        var baseClasses = "relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out";
+
+        if (IsDisabled)
+        {
+            baseClasses += " cursor-not-allowed opacity-50";
+            return ResolvedValue ? $"{baseClasses} bg-accent-300" : $"{baseClasses} bg-gray-200";
+        }
+        else
+        {
+            baseClasses += " cursor-pointer focus:ring-2 focus:ring-accent-600 focus:ring-offset-2 focus:outline-hidden";
+            return ResolvedValue ? $"{baseClasses} bg-accent-600" : $"{baseClasses} bg-gray-200";
+        }
+    }
+
+    private string GetToggleClasses()
+    {
+        var baseClasses = "pointer-events-none relative inline-block size-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out";
+        return ResolvedValue ? $"{baseClasses} translate-x-5" : $"{baseClasses} translate-x-0";
+    }
+
+    private string GetOffIconClasses()
+    {
+        var baseClasses = "absolute inset-0 flex size-full items-center justify-center transition-opacity duration-200 ease-in";
+        return ResolvedValue ? $"{baseClasses} opacity-0" : $"{baseClasses} opacity-100";
+    }
+
+    private string GetOnIconClasses()
+    {
+        var baseClasses = "absolute inset-0 flex size-full items-center justify-center transition-opacity duration-100 ease-out";
+        return ResolvedValue ? $"{baseClasses} opacity-100" : $"{baseClasses} opacity-0";
+    }
+
+    private string GetAriaChecked() => ResolvedValue ? "true" : "false";
+
+    private string GetLabelTextClasses() =>
+        IsDisabled ? "text-sm font-medium text-gray-400" : "text-sm font-medium text-gray-900";
+
+    private string GetStateTextClasses()
+    {
+        if (IsDisabled)
+            return ResolvedValue ? "text-green-400" : "text-gray-300";
+
+        return ResolvedValue ? "text-green-600" : "text-gray-400";
+    }
+
+    private string GetStateText() => ResolvedValue ? "On" : "Off";
+
+    public void Dispose()
+    {
+    }
+}

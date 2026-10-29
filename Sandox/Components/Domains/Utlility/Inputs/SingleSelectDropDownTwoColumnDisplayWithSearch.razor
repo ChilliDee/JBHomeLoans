@@ -1,0 +1,650 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@implements IDisposable
+
+<div class="relative" @ref="dropdownWrapperRef">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") z-10">
+        @Label
+    </label>
+
+    <div class="relative">
+        <input type="text"
+               id="@Id"
+               name="@Name"
+               disabled="@IsDisabled"
+               @ref="inputRef"
+               value="@GetInputDisplayValue()"
+               @oninput="HandleInput"
+               @onfocus="HandleFocus"
+               @onkeydown="HandleKeyDown"
+               placeholder="@Placeholder"
+               class="block w-full rounded-md px-3 py-1.5 pr-10 text-base outline-1 -outline-offset-1 sm:text-sm/6 text-gray-900 placeholder:text-gray-400 @(GetInputClasses())" />
+
+        <button type="button"
+                disabled="@IsDisabled"
+                @onclick="ToggleDropdown"
+                @onmousedown:preventDefault="true"
+                class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-auto">
+            <svg class="size-5 @(IsDisabled ? "text-gray-300" : "text-gray-400")" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+            </svg>
+        </button>
+    </div>
+
+    @if (isOpen && !IsDisabled)
+    {
+        var maxWidthClass = string.IsNullOrEmpty(DropdownMaxWidth)
+        ? "max-w-[min(600px,calc(100vw-4rem))]"
+        : $"max-w-[{DropdownMaxWidth}]";
+
+        <ul class="absolute z-100 mt-1 max-h-[240px] w-max min-w-full @maxWidthClass overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black/5 focus:outline-hidden sm:text-sm"
+            tabindex="-1"
+            role="listbox"
+            aria-labelledby="@Id"
+            @ref="dropdownListRef">
+
+            @if (AllowReset && SelectedOption != null && string.IsNullOrEmpty(searchText))
+            {
+                <li class="relative cursor-default py-2 pr-4 pl-8 text-red-600 select-none cursor-pointer hover:bg-gray-300 border-b border-gray-200 whitespace-nowrap"
+                    role="option"
+                    @onclick="() => ClearSelection()"
+                    @onmousedown:preventDefault="true">
+                    <span class="block font-normal italic">Clear</span>
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-red-600">
+                        <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" />
+                        </svg>
+                    </span>
+                </li>
+            }
+
+            @{
+                var filteredList = FilteredOptions;
+            }
+            @if (filteredList != null && filteredList.Any())
+            {
+                @for (int i = 0; i < Math.Min(filteredList.Count, MaxVisibleItems); i++)
+                {
+                    var option = filteredList[i];
+                    var index = i;
+                    <li @key="@($"{option.Id}_{option.Value}_{option.SecondaryValue}")"
+                        class="relative cursor-default py-2 pr-4 pl-8 text-gray-900 select-none cursor-pointer hover:bg-gray-300 whitespace-nowrap @(highlightedIndex == index ? "bg-accent-100" : "")"
+                        role="option"
+                        @onclick="() => SelectOption(option)"
+                        @onmousedown:preventDefault="true"
+                        @onmouseenter="() => highlightedIndex = index"
+                        data-index="@index">
+                        <div class="flex items-center gap-4">
+                            <span class="font-normal">@option.Value</span>
+                            @if (!string.IsNullOrEmpty(option.SecondaryValue))
+                            {
+                                <span class="font-normal text-gray-500 ml-auto">@option.SecondaryValue</span>
+                            }
+                        </div>
+                        @if (SelectedOption?.Value == option.Value && SelectedOption?.SecondaryValue == option.SecondaryValue)
+                        {
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">
+                                <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon">
+                                    <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"></path>
+                                </svg>
+                            </span>
+                        }
+                    </li>
+                }
+
+                @if (filteredList.Count > MaxVisibleItems)
+                {
+                    <li class="relative cursor-default py-2 px-4 text-gray-500 select-none italic whitespace-nowrap border-t border-gray-200">
+                        @(filteredList.Count - MaxVisibleItems) more results... (type to filter)
+                    </li>
+                }
+            }
+            else if (!string.IsNullOrEmpty(searchText))
+            {
+                <li class="relative cursor-default py-2 px-4 text-gray-500 select-none italic whitespace-nowrap">
+                    No results found
+                </li>
+            }
+        </ul>
+    }
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public SingleSelectDropDownTwoColumnDisplayWithSearchOption? SelectedOption { get; set; }
+    [Parameter] public IEnumerable<SingleSelectDropDownTwoColumnDisplayWithSearchOption> Options { get; set; } = null!;
+    [Parameter] public EventCallback<SingleSelectDropDownTwoColumnDisplayWithSearchOption?> AsyncCallBack { get; set; }
+    [Parameter] public Action<SingleSelectDropDownTwoColumnDisplayWithSearchOption?>? OnChange { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Select an option...";
+    [Parameter] public EventCallback<SingleSelectDropDownTwoColumnDisplayWithSearchOption?> SelectedOptionChanged { get; set; }
+    [Parameter] public bool AllowReset { get; set; } = false;
+    [Parameter] public bool HighlightWhenSelected { get; set; } = false;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool AutoOpen { get; set; } = false;
+    [Parameter] public bool ShowSecondaryValueInInput { get; set; } = false;
+    [Parameter] public string? DropdownMaxWidth { get; set; } = null;
+    [Parameter] public int MaxVisibleItems { get; set; } = 100;
+    [Parameter] public bool Required { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component self-registers
+    /// its Validate method into your validator list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    private bool isOpen = false;
+    private SingleSelectDropDownTwoColumnDisplayWithSearchOption? _previousSelectedOption;
+    private SingleSelectDropDownTwoColumnDisplayWithSearchOption? _tempSelectedOption;
+    private ElementReference dropdownListRef;
+    private ElementReference dropdownWrapperRef;
+    private ElementReference inputRef;
+    private int highlightedIndex = -1;
+    private string searchText = "";
+    private bool _previousAutoOpen = false;
+    private bool _userHasClosed = false;
+    private DotNetObjectReference<SingleSelectDropDownTwoColumnDisplayWithSearch>? _dotNetRef;
+    private bool _listenerAttached = false;
+    private bool _isSearching = false;
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    private List<SingleSelectDropDownTwoColumnDisplayWithSearchOption>? _cachedFilteredOptions;
+    private string _lastSearchText = "";
+
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
+
+    private List<SingleSelectDropDownTwoColumnDisplayWithSearchOption> FilteredOptions
+    {
+        get
+        {
+            if (_cachedFilteredOptions != null && searchText == _lastSearchText)
+                return _cachedFilteredOptions;
+
+            _lastSearchText = searchText;
+
+            if (Options == null)
+            {
+                _cachedFilteredOptions = new List<SingleSelectDropDownTwoColumnDisplayWithSearchOption>();
+                return _cachedFilteredOptions;
+            }
+
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                _cachedFilteredOptions = Options.ToList();
+                return _cachedFilteredOptions;
+            }
+
+            _cachedFilteredOptions = Options.Where(o =>
+                o.Value != null && o.Value.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+                (!string.IsNullOrEmpty(o.SecondaryValue) && o.SecondaryValue.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+            ).ToList();
+
+            return _cachedFilteredOptions;
+        }
+    }
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+
+        ValidationRef?.Invoke(Validate);
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && SelectedOption == null)
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+        }
+
+        if (isOpen && !_listenerAttached && _dotNetRef != null)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("setupClickOutsideListenerWithSearch", dropdownWrapperRef, _dotNetRef);
+                _listenerAttached = true;
+            }
+            catch { }
+        }
+        else if (!isOpen && _listenerAttached)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("removeClickOutsideListenerWithSearch", dropdownWrapperRef);
+                _listenerAttached = false;
+            }
+            catch { }
+        }
+
+        if (AutoOpen && !_previousAutoOpen)
+        {
+            _previousAutoOpen = true;
+            _userHasClosed = false;
+
+            if (!IsDisabled && !isOpen && Options != null && Options.Any())
+            {
+                isOpen = true;
+                var filtered = FilteredOptions;
+
+                if (SelectedOption != null)
+                {
+                    var index = filtered.FindIndex(o => o.Value == SelectedOption.Value && o.SecondaryValue == SelectedOption.SecondaryValue);
+                    highlightedIndex = index >= 0 ? index : 0;
+                }
+                else
+                {
+                    highlightedIndex = 0;
+                }
+
+                StateHasChanged();
+            }
+        }
+        else if (!AutoOpen && _previousAutoOpen)
+        {
+            _previousAutoOpen = false;
+            _userHasClosed = false;
+        }
+        else if (isOpen && highlightedIndex >= 0 && dropdownListRef.Id != null)
+        {
+            await ScrollToHighlightedItem();
+        }
+    }
+
+    public void Dispose()
+    {
+
+        try
+        {
+            JSRuntime.InvokeVoidAsync("removeClickOutsideListenerWithSearch", dropdownWrapperRef);
+        }
+        catch { }
+
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+
+    public override async Task SetParametersAsync(ParameterView parameters)
+    {
+        var newSelectedOption = parameters.GetValueOrDefault<SingleSelectDropDownTwoColumnDisplayWithSearchOption?>(nameof(SelectedOption));
+
+        if (newSelectedOption != _previousSelectedOption)
+        {
+            _previousSelectedOption = newSelectedOption;
+            _cachedFilteredOptions = null;
+            await base.SetParametersAsync(parameters);
+            StateHasChanged();
+        }
+        else
+        {
+            await base.SetParametersAsync(parameters);
+        }
+    }
+
+    public class SingleSelectDropDownTwoColumnDisplayWithSearchOption
+    {
+        public SingleSelectDropDownTwoColumnDisplayWithSearchOption(string value, string? secondaryValue = null, int? id = null)
+        {
+            Id = id ?? 0;
+            Value = value;
+            SecondaryValue = secondaryValue ?? string.Empty;
+        }
+
+        public int Id { get; set; }
+        public string Value { get; set; } = string.Empty;
+        public string SecondaryValue { get; set; } = string.Empty;
+    }
+
+    private string GetInputDisplayValue()
+    {
+        if (_isSearching && !string.IsNullOrEmpty(searchText))
+            return searchText;
+
+        if (isOpen && !_isSearching)
+            return "";
+
+        if (SelectedOption != null)
+        {
+            if (ShowSecondaryValueInInput && !string.IsNullOrEmpty(SelectedOption.SecondaryValue))
+                return $"{SelectedOption.Value} - {SelectedOption.SecondaryValue}";
+            return SelectedOption.Value;
+        }
+
+        return "";
+    }
+
+    private void HandleInput(ChangeEventArgs e)
+    {
+        searchText = e.Value?.ToString() ?? "";
+        _isSearching = true;
+        _cachedFilteredOptions = null;
+
+        if (!isOpen && !string.IsNullOrEmpty(searchText) && Options != null && Options.Any())
+        {
+            _tempSelectedOption = SelectedOption;
+            isOpen = true;
+            highlightedIndex = 0;
+        }
+
+        StateHasChanged();
+    }
+
+    private void HandleFocus()
+    {
+        if (IsDisabled) return;
+
+        _tempSelectedOption = SelectedOption;
+        searchText = "";
+        _isSearching = false;
+        _cachedFilteredOptions = null;
+
+        if (!isOpen && Options != null)
+        {
+            isOpen = true;
+            var filtered = FilteredOptions;
+            highlightedIndex = SelectedOption != null ?
+                filtered.FindIndex(o => o.Value == SelectedOption.Value && o.SecondaryValue == SelectedOption.SecondaryValue) : 0;
+
+            if (highlightedIndex < 0) highlightedIndex = 0;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        var filteredList = FilteredOptions;
+
+        if (filteredList == null || !filteredList.Any())
+        {
+            if (e.Key == "Escape" || e.Key == "Tab")
+            {
+                SelectedOption = _tempSelectedOption;
+                isOpen = false;
+                _userHasClosed = true;
+                highlightedIndex = -1;
+                searchText = "";
+                _isSearching = false;
+                _cachedFilteredOptions = null;
+                StateHasChanged();
+            }
+            return;
+        }
+
+        var maxIndex = Math.Min(filteredList.Count, MaxVisibleItems) - 1;
+
+        switch (e.Key)
+        {
+            case "Escape":
+                SelectedOption = _tempSelectedOption;
+                isOpen = false;
+                _userHasClosed = true;
+                highlightedIndex = -1;
+                searchText = "";
+                _isSearching = false;
+                _cachedFilteredOptions = null;
+                StateHasChanged();
+                break;
+
+            case "Enter":
+                if (isOpen && highlightedIndex >= 0 && highlightedIndex < filteredList.Count)
+                    await SelectOption(filteredList[highlightedIndex]);
+                else if (!isOpen)
+                {
+                    _tempSelectedOption = SelectedOption;
+                    isOpen = true;
+                    highlightedIndex = 0;
+                    StateHasChanged();
+                }
+                break;
+
+            case "ArrowDown":
+                if (!isOpen)
+                {
+                    _tempSelectedOption = SelectedOption;
+                    isOpen = true;
+                    highlightedIndex = 0;
+                    StateHasChanged();
+                }
+                else if (filteredList.Any())
+                {
+                    highlightedIndex = Math.Min(highlightedIndex + 1, maxIndex);
+                    await ScrollToHighlightedItem();
+                    StateHasChanged();
+                }
+                break;
+
+            case "ArrowUp":
+                if (isOpen && filteredList.Any())
+                {
+                    highlightedIndex = Math.Max(highlightedIndex - 1, 0);
+                    await ScrollToHighlightedItem();
+                    StateHasChanged();
+                }
+                break;
+
+            case "Home":
+                if (isOpen && filteredList.Any())
+                {
+                    highlightedIndex = 0;
+                    await ScrollToHighlightedItem();
+                    StateHasChanged();
+                }
+                break;
+
+            case "End":
+                if (isOpen && filteredList.Any())
+                {
+                    highlightedIndex = maxIndex;
+                    await ScrollToHighlightedItem();
+                    StateHasChanged();
+                }
+                break;
+
+            case "Tab":
+                if (isOpen)
+                {
+                    SelectedOption = _tempSelectedOption;
+                    isOpen = false;
+                    _userHasClosed = true;
+                    highlightedIndex = -1;
+                    searchText = "";
+                    _isSearching = false;
+                    _cachedFilteredOptions = null;
+                    StateHasChanged();
+                }
+                break;
+        }
+    }
+
+    private async Task ScrollToHighlightedItem()
+    {
+        if (highlightedIndex >= 0 && dropdownListRef.Id != null)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("scrollToHighlightedItemWithSearch", dropdownListRef, highlightedIndex);
+            }
+            catch (JSException) { }
+        }
+    }
+
+    private async Task SelectOption(SingleSelectDropDownTwoColumnDisplayWithSearchOption option)
+    {
+        if (IsDisabled) return;
+
+        SelectedOption = option;
+        isOpen = false;
+        _userHasClosed = true;
+        highlightedIndex = -1;
+        searchText = "";
+        _isSearching = false;
+        _cachedFilteredOptions = null;
+
+        // Clear validation state on valid selection
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        await SelectedOptionChanged.InvokeAsync(option);
+        OnChange?.Invoke(option);
+        await AsyncCallBack.InvokeAsync(option);
+        CallBack?.Invoke();
+    }
+
+    private async Task ClearSelection()
+    {
+        if (IsDisabled) return;
+
+        SelectedOption = null;
+        isOpen = false;
+        _userHasClosed = true;
+        highlightedIndex = -1;
+        searchText = "";
+        _isSearching = false;
+        _cachedFilteredOptions = null;
+
+        // Flag invalid immediately if required
+        if (Required)
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required";
+        }
+
+        await SelectedOptionChanged.InvokeAsync(null);
+        OnChange?.Invoke(null);
+        await AsyncCallBack.InvokeAsync(null);
+        CallBack?.Invoke();
+    }
+
+    private void ToggleDropdown()
+    {
+        if (IsDisabled) return;
+
+        isOpen = !isOpen;
+        if (isOpen && Options != null)
+        {
+            _tempSelectedOption = SelectedOption;
+            searchText = "";
+            _isSearching = false;
+            _cachedFilteredOptions = null;
+
+            var filteredList = FilteredOptions;
+            highlightedIndex = SelectedOption != null ?
+                filteredList.FindIndex(o => o.Value == SelectedOption.Value && o.SecondaryValue == SelectedOption.SecondaryValue) : 0;
+
+            if (highlightedIndex < 0) highlightedIndex = 0;
+        }
+        else
+        {
+            SelectedOption = _tempSelectedOption;
+            _userHasClosed = true;
+            highlightedIndex = -1;
+            searchText = "";
+            _isSearching = false;
+            _cachedFilteredOptions = null;
+        }
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void CloseFromClickOutside()
+    {
+        if (isOpen && !IsDisabled)
+        {
+            SelectedOption = _tempSelectedOption;
+            isOpen = false;
+            _userHasClosed = true;
+            highlightedIndex = -1;
+            searchText = "";
+            _isSearching = false;
+            _cachedFilteredOptions = null;
+            StateHasChanged();
+        }
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "outline-1 -outline-offset-1";
+
+        if (IsDisabled)
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (isInvalid)
+            return $"{baseClasses} bg-white outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-600";
+
+        if (HighlightWhenSelected && SelectedOption != null)
+            return $"{baseClasses} bg-amber-400 outline-amber-400 border-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600";
+
+        return $"{baseClasses} bg-white outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+    }
+}
+
+<script>
+    window.scrollToHighlightedItemWithSearch = (listElement, index) => {
+        if (!listElement) return;
+        const items = listElement.querySelectorAll('[data-index]');
+        if (items && items[index]) {
+            items[index].scrollIntoView({
+                block: 'nearest',
+                behavior: 'smooth'
+            });
+        }
+    };
+
+    window.setupClickOutsideListenerWithSearch = (element, dotNetRef) => {
+        if (!element) return;
+        window.removeClickOutsideListenerWithSearch(element);
+
+        const clickHandler = (event) => {
+            if (!document.body.contains(element)) {
+                window.removeClickOutsideListenerWithSearch(element);
+                return;
+            }
+
+            if (!element.contains(event.target)) {
+                try {
+                    dotNetRef.invokeMethodAsync('CloseFromClickOutside');
+                } catch (error) {
+                    window.removeClickOutsideListenerWithSearch(element);
+                }
+            }
+        };
+
+        element._clickOutsideHandlerWithSearch = clickHandler;
+        document.addEventListener('click', clickHandler, true);
+    };
+
+    window.removeClickOutsideListenerWithSearch = (element) => {
+        if (element && element._clickOutsideHandlerWithSearch) {
+            document.removeEventListener('click', element._clickOutsideHandlerWithSearch, true);
+            delete element._clickOutsideHandlerWithSearch;
+        }
+    };
+</script>

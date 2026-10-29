@@ -1,0 +1,66 @@
+﻿@* Spinner Component for Blazor *@
+
+<!-- Basic Spinner -->
+<div class="@ContainerClass">
+    @if (ShowSpinner)
+    {
+        @if (SpinnerType == "basic")
+        {
+            <!-- Simple rotating border spinner -->
+            <div class="@($"w-{Size} h-{Size} border-{BorderWidth} border-{Color}-200 border-t-{Color}-500 rounded-full animate-spin")"></div>
+        }
+        else if (SpinnerType == "dots")
+        {
+            <!-- Three bouncing dots -->
+            <div class="flex space-x-1">
+                <div class="@($"w-{DotSize} h-{DotSize} bg-{Color}-500 rounded-full animate-bounce")"></div>
+                <div class="@($"w-{DotSize} h-{DotSize} bg-{Color}-500 rounded-full animate-bounce")" style="animation-delay: 0.1s"></div>
+                <div class="@($"w-{DotSize} h-{DotSize} bg-{Color}-500 rounded-full animate-bounce")" style="animation-delay: 0.2s"></div>
+            </div>
+        }
+        else if (SpinnerType == "pulse")
+        {
+            <!-- Pulsing circle -->
+            <div class="@($"w-{Size} h-{Size} bg-{Color}-500 rounded-full animate-pulse opacity-75")"></div>
+        }
+        else if (SpinnerType == "ring")
+        {
+            <!-- Ring with rotating segment -->
+            <div class="relative @($"w-{Size} h-{Size}")">
+                <div class="@($"absolute inset-0 w-{Size} h-{Size} border-{BorderWidth} border-{Color}-200 rounded-full")"></div>
+                <div class="@($"absolute inset-0 w-{Size} h-{Size} border-{BorderWidth} border-t-{Color}-500 border-r-{Color}-500 rounded-full animate-spin")"></div>
+            </div>
+        }
+        else if (SpinnerType == "bars")
+        {
+            <!-- Loading bars -->
+            <div class="flex space-x-1">
+                <div class="@($"w-1 h-{Size} bg-{Color}-500 animate-pulse")" style="animation-delay: 0s"></div>
+                <div class="@($"w-1 h-{Size} bg-{Color}-500 animate-pulse")" style="animation-delay: 0.1s"></div>
+                <div class="@($"w-1 h-{Size} bg-{Color}-500 animate-pulse")" style="animation-delay: 0.2s"></div>
+                <div class="@($"w-1 h-{Size} bg-{Color}-500 animate-pulse")" style="animation-delay: 0.3s"></div>
+                <div class="@($"w-1 h-{Size} bg-{Color}-500 animate-pulse")" style="animation-delay: 0.4s"></div>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(Text))
+        {
+            <div class="@($"mt-{TextSpacing} text-{TextSize} text-{Color}-600 font-medium")">
+                @Text
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public bool ShowSpinner { get; set; } = true;
+    [Parameter] public string SpinnerType { get; set; } = "basic"; // basic, dots, pulse, ring, bars
+    [Parameter] public string Size { get; set; } = "8"; // Tailwind size class number (4, 6, 8, 12, 16, etc.)
+    [Parameter] public string DotSize { get; set; } = "2"; // For dots spinner
+    [Parameter] public string BorderWidth { get; set; } = "2"; // Border width for ring spinners
+    [Parameter] public string Color { get; set; } = "blue"; // Tailwind color name
+    [Parameter] public string Text { get; set; } = ""; // Optional loading text
+    [Parameter] public string TextSize { get; set; } = "sm"; // Text size class
+    [Parameter] public string TextSpacing { get; set; } = "3"; // Margin top for text
+    [Parameter] public string ContainerClass { get; set; } = "flex flex-col items-center justify-center"; // Container styling
+}

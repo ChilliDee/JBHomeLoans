@@ -1,0 +1,196 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using System.Globalization
+@implements IDisposable
+@typeparam TValue
+
+<div class="relative">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+        @Label
+    </label>
+    <input type="number"
+           name="@Name"
+           id="@Id"
+           value="@Value?.ToString()"
+           disabled="@IsDisabled"
+           @onchange="HandleChange"
+           step="@GetStep()"
+           min="@Min?.ToString()"
+           max="@Max?.ToString()"
+           class="@GetInputClasses()"
+           placeholder="@Placeholder"
+           @ref="inputRef" />
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public TValue? Value { get; set; }
+    [Parameter] public EventCallback<TValue?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action<TValue?>? OnChange { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = string.Empty;
+    [Parameter] public int DecimalPlaces { get; set; } = 2;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public TValue? Min { get; set; }
+    [Parameter] public TValue? Max { get; set; }
+    [Parameter] public bool AutoFocus { get; set; } = false;
+
+    private ElementReference inputRef;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component self-registers
+    /// its Validate method into your validator list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        base.OnInitialized();
+
+        ValidationRef?.Invoke(Validate);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AutoFocus && !IsDisabled)
+        {
+            await inputRef.FocusAsync();
+        }
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        var underlyingType = Nullable.GetUnderlyingType(typeof(TValue));
+        var isEmpty = underlyingType != null && Value == null;
+
+        if (Required && isEmpty)
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (!isEmpty && Value is IComparable comparableValue)
+        {
+            if (Min != null && comparableValue.CompareTo(Min) < 0)
+            {
+                isInvalid = true;
+                errorMessage = $"{Label} must be at least {Min}";
+                StateHasChanged();
+                return (false, Label);
+            }
+
+            if (Max != null && comparableValue.CompareTo(Max) > 0)
+            {
+                isInvalid = true;
+                errorMessage = $"{Label} must be no more than {Max}";
+                StateHasChanged();
+                return (false, Label);
+            }
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private string GetStep()
+    {
+        var underlyingType = Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue);
+
+        if (underlyingType == typeof(int))
+            return "1";
+        else if (underlyingType == typeof(decimal))
+            return DecimalPlaces > 0 ? $"0.{new string('0', DecimalPlaces - 1)}1" : "1";
+
+        return "1";
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "border-none block w-full rounded-md px-3 py-1.5 text-base outline-1 -outline-offset-1 placeholder:text-gray-400 sm:text-sm/6";
+
+        if (IsDisabled)
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (Highlight)
+            return $"{baseClasses} text-gray-900 outline-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600";
+
+        if (isInvalid)
+            return $"{baseClasses} bg-white text-gray-900 outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-600";
+
+        return $"{baseClasses} bg-white text-gray-900 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        var stringValue = e.Value?.ToString();
+        if (string.IsNullOrEmpty(stringValue))
+        {
+            Value = default;
+        }
+        else
+        {
+            Value = ConvertToValue(stringValue);
+        }
+
+        // Clear validation state on valid input
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        OnChange?.Invoke(Value);
+        await ValueChanged.InvokeAsync(Value);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+    }
+
+    private TValue? ConvertToValue(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return default;
+
+        var underlyingType = Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue);
+
+        try
+        {
+            if (underlyingType == typeof(int))
+            {
+                var intValue = int.Parse(value, NumberStyles.Integer, CultureInfo.CurrentCulture);
+                return (TValue?)(object)intValue;
+            }
+            else if (underlyingType == typeof(decimal))
+            {
+                var decimalValue = decimal.Parse(value, NumberStyles.Number, CultureInfo.CurrentCulture);
+                return (TValue?)(object)decimalValue;
+            }
+        }
+        catch
+        {
+            return default;
+        }
+
+        return default;
+    }
+
+    public void Dispose()
+    {
+    }
+}

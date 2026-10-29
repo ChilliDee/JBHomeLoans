@@ -1,0 +1,54 @@
+<div id="@_d.I.ClassName" class="bg-slate-950">
+    @if (_d.I.InitialisationCompleted == false || _d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestIsLoading)
+    {
+        <div class="flex items-center justify-center gap-3 p-6 text-sm text-slate-300">
+            <svg class="animate-spin w-4 h-4 text-amber-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Loading...
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasFailed)
+    {
+        <div class="mx-4 my-3 flex items-start gap-3 p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+            <svg class="w-4 h-4 mt-0.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            @_d.RC_Internal.Initialise_HD_.ResponseData.ErrorMessage
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasCompleted)
+    {
+        <footer class="mx-auto max-w-7xl px-6 py-20 lg:px-8">
+            <div class="grid grid-cols-1 gap-12 lg:grid-cols-3">
+                <div>
+                    <a href="/home" class="text-2xl font-black uppercase tracking-tight text-amber-400">@_d.I.Inputs.BrandName</a>
+                    <p class="mt-4 max-w-xs text-base text-slate-400">Finance for cars, utes, motorbikes, caravans and more.</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-8 sm:grid-cols-4 lg:col-span-2">
+                    @foreach (var column in _d.I.Inputs.Items)
+                    {
+                        <div>
+                            <h3 class="text-sm font-semibold uppercase tracking-widest text-amber-400">@column.Title</h3>
+                            <ul class="mt-5 flex flex-col gap-3">
+                                @foreach (var link in column.Links)
+                                {
+                                    <li>
+                                        <a href="@link.Href" class="text-sm text-slate-300 transition-colors hover:text-white">@link.Label</a>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="mt-16 border-t border-white/10 pt-8">
+                <p class="max-w-4xl text-xs leading-relaxed text-slate-500">@_d.I.Inputs.SmallPrint</p>
+                <p class="mt-6 text-xs text-slate-500">&copy; @DateTime.Now.Year @_d.I.Inputs.BrandName. Sandbox page.</p>
+            </div>
+        </footer>
+    }
+</div>

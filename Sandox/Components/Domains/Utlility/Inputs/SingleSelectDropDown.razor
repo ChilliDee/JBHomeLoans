@@ -1,0 +1,662 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@implements IDisposable
+
+<div class="relative" @ref="dropdownWrapperRef">
+    <label for="@_instanceId" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+        @Label
+    </label>
+
+    <button type="button"
+            id="@_instanceId"
+            name="@Name"
+            disabled="@IsDisabled"
+            @ref="buttonRef"
+            class="block w-full rounded-md px-3 py-1.5 text-base outline-1 -outline-offset-1 sm:text-sm/6 text-left flex justify-between items-center min-h-[38px] @(GetInputClasses())">
+        @* Open/close, positioning, keyboard nav (arrows/home/end/letter-jump), click-outside, and
+           selection highlighting are all owned by JS (SSD.init) — nothing round-trips through the
+           server just to open the list. The only time this talks back to .NET is once an option is
+           actually chosen or cleared. *@
+        <span @ref="selectedTextRef" class="@(SelectedOption == null ? "text-gray-400" : (IsDisabled ? "text-gray-500" : "text-gray-900")) truncate">
+            @(SelectedOption != null ? SelectedOption.Value : Placeholder)
+        </span>
+        <svg class="size-5 @(IsDisabled ? "text-gray-300" : "text-gray-400") flex-shrink-0 ml-2" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+        </svg>
+    </button>
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+
+    @* Always rendered (hidden by default) so JS has a stable element to attach to the body and
+       populate. Content, open/closed state, and highlighting are all owned by JS from here on. *@
+    <ul class="max-h-[240px] overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black/5 focus:outline-hidden sm:text-sm"
+        style="display:none;"
+        tabindex="-1"
+        role="listbox"
+        aria-labelledby="@_instanceId"
+        @ref="dropdownListRef">
+    </ul>
+</div>
+
+@code {
+    [Parameter] public SingleSelectDropDownOption? SelectedOption { get; set; }
+    [Parameter] public IEnumerable<SingleSelectDropDownOption> Options { get; set; } = null!;
+    [Parameter] public EventCallback<SingleSelectDropDownOption?> AsyncCallBack { get; set; }
+    [Parameter] public Action<SingleSelectDropDownOption?>? OnChange { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional. Used only as a readable prefix for the generated instance id (helps when
+    /// inspecting the DOM / debugging). Does NOT need to be unique — uniqueness is guaranteed
+    /// internally via a GUID suffix, so multiple instances on the same page (e.g. one per table
+    /// row) can safely share the same Id value. This matters here because, like
+    /// SingleSelectDropDownWithSearch, the JS module below keys its instance dictionary off this
+    /// id — a collision would let one dropdown's open/close silently hijack another's.
+    /// </summary>
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Select an option...";
+    [Parameter] public EventCallback<SingleSelectDropDownOption?> SelectedOptionChanged { get; set; }
+    [Parameter] public bool AllowReset { get; set; } = false;
+    [Parameter] public bool HighlightWhenSelected { get; set; } = false;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool AutoOpen { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+    private SingleSelectDropDownOption? _previousSelectedOption;
+    private IEnumerable<SingleSelectDropDownOption>? _previousOptions;
+    private ElementReference dropdownListRef;
+    private ElementReference dropdownWrapperRef;
+    private ElementReference buttonRef;
+    private ElementReference selectedTextRef;
+    private bool _previousAutoOpen = false;
+    private DotNetObjectReference<SingleSelectDropDown>? _dotNetRef;
+    private bool _isDisposed = false;
+    private bool _initialised = false;
+
+    // Guaranteed-unique key for this instance — used for the DOM id/for/aria-labelledby
+    // attributes and every SSD.* JS call. Generated once per component instance so it survives
+    // re-renders.
+    private string _instanceId = string.Empty;
+
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        _instanceId = string.IsNullOrWhiteSpace(Id)
+            ? $"ssd-{Guid.NewGuid():N}"
+            : $"{Id}-{Guid.NewGuid():N}";
+
+        ValidationRef?.Invoke(Validate);
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (_isDisposed) return (true, Label);
+
+        if (Required && SelectedOption is null)
+        {
+            isInvalid = true;
+            errorMessage = "This field is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (_isDisposed) return;
+
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+
+            await JSRuntime.InvokeVoidAsync(
+                "SSD.init",
+                _instanceId,
+                buttonRef,
+                selectedTextRef,
+                dropdownListRef,
+                dropdownWrapperRef,
+                BuildOptionsPayload(),
+                AllowReset,
+                SelectedOption?.Value,
+                Placeholder,
+                _dotNetRef);
+
+            _initialised = true;
+        }
+
+        // AutoOpen handling — this is a server-driven "open this for the user" signal, so it
+        // still goes through interop, but it's a one-off call rather than something on the
+        // per-click open path.
+        if (AutoOpen && !_previousAutoOpen)
+        {
+            _previousAutoOpen = true;
+
+            if (!IsDisabled && Options != null && Options.Any())
+            {
+                await JSRuntime.InvokeVoidAsync("SSD.open", _instanceId);
+            }
+        }
+        else if (!AutoOpen && _previousAutoOpen)
+        {
+            _previousAutoOpen = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+
+        try { JSRuntime.InvokeVoidAsync("SSD.dispose", _instanceId); }
+        catch { }
+
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+
+    public override async Task SetParametersAsync(ParameterView parameters)
+    {
+        var newSelectedOption = parameters.GetValueOrDefault<SingleSelectDropDownOption?>(nameof(SelectedOption));
+        var newOptions = parameters.GetValueOrDefault<IEnumerable<SingleSelectDropDownOption>>(nameof(Options));
+
+        var selectionChanged = newSelectedOption != _previousSelectedOption;
+        var optionsChanged = !ReferenceEquals(newOptions, _previousOptions);
+
+        _previousSelectedOption = newSelectedOption;
+        _previousOptions = newOptions;
+
+        // Clear validation error when a value is set from outside
+        if (selectionChanged && newSelectedOption is not null)
+        {
+            isInvalid = false;
+            errorMessage = string.Empty;
+        }
+
+        await base.SetParametersAsync(parameters);
+
+        // Keep the JS-owned copy of options/selection in sync when the parent changes them
+        // programmatically. This is not a per-click path, so the round trip is fine here.
+        if (_initialised && (selectionChanged || optionsChanged))
+        {
+            await JSRuntime.InvokeVoidAsync("SSD.updateOptions", _instanceId, BuildOptionsPayload(), SelectedOption?.Value);
+        }
+
+        if (selectionChanged)
+        {
+            StateHasChanged();
+        }
+    }
+
+    public class SingleSelectDropDownOption
+    {
+        public SingleSelectDropDownOption(string value, int? id = null)
+        {
+            Id = id;
+            Value = value;
+        }
+
+        public int? Id { get; set; }
+        public string Value { get; set; } = string.Empty;
+    }
+
+    private IEnumerable<object> BuildOptionsPayload()
+        => (Options ?? Enumerable.Empty<SingleSelectDropDownOption>()).Select(o => new { id = o.Id, value = o.Value });
+
+    // ---- The two JS -> .NET entry points. Everything else (open/close, keyboard nav,
+    // highlighting, click-outside, positioning) is handled entirely in JS and never reaches here.
+    // Matching is done by Value (not Id), same as the original component's own tick logic, since
+    // Id is optional/nullable on this option type and can't be relied on to be populated by every
+    // caller. ----
+
+    [JSInvokable]
+    public async Task OnOptionChosen(string value)
+    {
+        if (_isDisposed || IsDisabled) return;
+
+        var option = Options?.FirstOrDefault(o => o.Value == value);
+        if (option == null) return;
+
+        await SelectOption(option);
+    }
+
+    [JSInvokable]
+    public async Task OnCleared()
+    {
+        if (_isDisposed || IsDisabled) return;
+
+        await ClearSelection();
+    }
+
+    private async Task SelectOption(SingleSelectDropDownOption option)
+    {
+        if (_isDisposed) return;
+
+        SelectedOption = option;
+        _previousSelectedOption = option;
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        await SelectedOptionChanged.InvokeAsync(option);
+        OnChange?.Invoke(option);
+        await AsyncCallBack.InvokeAsync(option);
+        CallBack?.Invoke();
+
+        StateHasChanged();
+    }
+
+    private async Task ClearSelection()
+    {
+        if (_isDisposed) return;
+
+        SelectedOption = null;
+        _previousSelectedOption = null;
+
+        await SelectedOptionChanged.InvokeAsync(null);
+        OnChange?.Invoke(null);
+        await AsyncCallBack.InvokeAsync(null);
+        CallBack?.Invoke();
+
+        StateHasChanged();
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "outline-1 -outline-offset-1";
+
+        if (IsDisabled)
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (isInvalid)
+            return $"{baseClasses} bg-white outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-500 cursor-pointer";
+
+        if (HighlightWhenSelected && SelectedOption != null)
+            return $"{baseClasses} bg-amber-400 outline-amber-400 border-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600 cursor-pointer";
+
+        return $"{baseClasses} bg-white outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600 cursor-pointer";
+    }
+}
+
+<script>
+    // SSD = Single Select Dropdown (no search input). One module, one instance per component
+    // (keyed by the guaranteed-unique instance id passed from .NET). Everything here runs purely
+    // client-side — open/close, keyboard nav (arrows/home/end/enter/escape/letter-jump),
+    // highlighting, click-outside, and the body-portal positioning. The ONLY time this module
+    // talks back to .NET is in choose() and clearSelection(), i.e. once per actual selection —
+    // never just to open the list.
+    window.SSD = window.SSD || (function() {
+        const instances = {};
+
+        const svgClear = '<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" /></svg>';
+        const svgCheck = '<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"></path></svg>';
+
+        function esc(s) {
+            return (s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function render(inst) {
+            let html = '';
+
+            if (inst.allowReset && inst.selectedValue) {
+                html += '<li data-role="clear" class="relative cursor-default py-2 pr-4 pl-8 text-red-600 select-none cursor-pointer hover:bg-gray-300 border-b border-gray-200">'
+                    + '<span class="block truncate font-normal italic">Clear</span>'
+                    + '<span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-red-600">' + svgClear + '</span>'
+                    + '</li>';
+            }
+
+            inst.options.forEach((o, i) => {
+                const hl = i === inst.highlighted ? 'bg-accent-100' : '';
+                const sel = o.value === inst.selectedValue;
+                html += '<li data-role="option" data-index="' + i + '" class="relative cursor-default py-2 pr-4 pl-8 text-gray-900 select-none cursor-pointer hover:bg-gray-300 ' + hl + '">'
+                    + '<span class="block truncate font-normal">' + esc(o.value) + '</span>'
+                    + (sel ? '<span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">' + svgCheck + '</span>' : '')
+                    + '</li>';
+            });
+
+            inst.listEl.innerHTML = html;
+        }
+
+        function updatePosition(inst) {
+            if (!document.body.contains(inst.wrapperEl)) return;
+            const rect = inst.wrapperEl.getBoundingClientRect();
+            Object.assign(inst.listEl.style, {
+                position: 'fixed',
+                top: (rect.bottom + 4) + 'px',
+                left: rect.left + 'px',
+                width: rect.width + 'px',
+                zIndex: '10050',
+                margin: '0',
+                display: 'block'
+            });
+        }
+
+        // function attachToBody(inst) {
+        //     if (!inst.listEl._originalParent) inst.listEl._originalParent = inst.listEl.parentElement;
+        //     if (inst.listEl.parentElement !== document.body) document.body.appendChild(inst.listEl);
+
+        //     requestAnimationFrame(() => requestAnimationFrame(() => updatePosition(inst)));
+
+        //     inst._posHandler = () => updatePosition(inst);
+        //     window.addEventListener('scroll', inst._posHandler, true);
+        //     window.addEventListener('resize', inst._posHandler, true);
+        // }
+
+        function attachToBody(inst) {
+            if (!inst.listEl._originalParent) inst.listEl._originalParent = inst.listEl.parentElement;
+            if (inst.listEl.parentElement !== document.body) document.body.appendChild(inst.listEl);
+
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                updatePosition(inst);
+                scrollHighlighted(inst);
+            }));
+
+            inst._posHandler = () => updatePosition(inst);
+            window.addEventListener('scroll', inst._posHandler, true);
+            window.addEventListener('resize', inst._posHandler, true);
+        }
+
+        function detachFromBody(inst) {
+            if (inst._posHandler) {
+                window.removeEventListener('scroll', inst._posHandler, true);
+                window.removeEventListener('resize', inst._posHandler, true);
+                inst._posHandler = null;
+            }
+
+            const parent = inst.listEl._originalParent;
+            if (parent && document.body.contains(parent)) parent.appendChild(inst.listEl);
+
+            Object.assign(inst.listEl.style, { position: '', top: '', left: '', width: '', zIndex: '', margin: '', display: 'none' });
+        }
+
+        function open(id) {
+            const inst = instances[id];
+            if (!inst || inst.isOpen || inst.buttonEl.disabled) return;
+
+            inst.isOpen = true;
+            inst.searchString = '';
+
+            inst.highlighted = inst.selectedValue ? inst.options.findIndex(o => o.value === inst.selectedValue) : 0;
+            if (inst.highlighted < 0) inst.highlighted = 0;
+
+            render(inst);
+            attachToBody(inst);
+        }
+
+        function close(id) {
+            const inst = instances[id];
+            if (!inst || !inst.isOpen) return;
+
+            inst.isOpen = false;
+            inst.highlighted = -1;
+            inst.searchString = '';
+            detachFromBody(inst);
+        }
+
+        function toggle(id) {
+            const inst = instances[id];
+            if (!inst) return;  
+            inst.isOpen ? close(id) : open(id);
+        }
+
+        function forceClose(id) {
+            close(id);
+        }
+
+        function setSelectedDisplay(inst) {
+            if (!inst.textEl) return;
+            if (inst.selectedValue) {
+                inst.textEl.textContent = inst.selectedValue;
+                inst.textEl.classList.remove('text-gray-400');
+            } else {
+                inst.textEl.textContent = inst.placeholder;
+                inst.textEl.classList.add('text-gray-400');
+            }
+        }
+
+        function choose(id, index) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            const option = inst.options[index];
+            if (!option) return;
+
+            inst.selectedValue = option.value;
+            setSelectedDisplay(inst);
+            close(id);
+
+            inst.dotNetRef.invokeMethodAsync('OnOptionChosen', option.value);
+        }
+
+        function clearSelection(id) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.selectedValue = null;
+            setSelectedDisplay(inst);
+            close(id);
+
+            inst.dotNetRef.invokeMethodAsync('OnCleared');
+        }
+
+        function scrollHighlighted(inst) {
+            const el = inst.listEl.querySelector('[data-index="' + inst.highlighted + '"]');
+            if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+
+        function handleLetterNav(id, key) {
+            const inst = instances[id];
+            if (!inst || !inst.options.length) return;
+
+            clearTimeout(inst._searchTimer);
+            inst.searchString += key;
+
+            const items = inst.options;
+            const start = inst.isOpen && inst.highlighted >= 0 ? inst.highlighted : 0;
+            let matchIndex = -1;
+
+            for (let i = start; i < items.length; i++) {
+                if (items[i].value.toLowerCase().startsWith(inst.searchString)) { matchIndex = i; break; }
+            }
+            if (matchIndex === -1) {
+                for (let i = 0; i < start; i++) {
+                    if (items[i].value.toLowerCase().startsWith(inst.searchString)) { matchIndex = i; break; }
+                }
+            }
+            if (matchIndex === -1 && inst.searchString.length > 1) {
+                for (let i = start + 1; i < items.length; i++) {
+                    if (items[i].value.toLowerCase().startsWith(key)) { matchIndex = i; inst.searchString = key; break; }
+                }
+                if (matchIndex === -1) {
+                    for (let i = 0; i <= start; i++) {
+                        if (items[i].value.toLowerCase().startsWith(key)) { matchIndex = i; inst.searchString = key; break; }
+                    }
+                }
+            }
+
+            if (matchIndex >= 0) {
+                if (!inst.isOpen) {
+                    choose(id, matchIndex);
+                } else {
+                    inst.highlighted = matchIndex;
+                    render(inst);
+                    scrollHighlighted(inst);
+                }
+            }
+
+            inst._searchTimer = setTimeout(() => { inst.searchString = ''; }, 1000);
+        }
+
+        function handleKeydown(id, e) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            const items = inst.options;
+
+            switch (e.key) {
+                case 'Escape':
+                    close(id);
+                    break;
+
+                case 'Enter':
+                case ' ':
+                    e.preventDefault();
+                    if (!inst.isOpen) {
+                        open(id);
+                    } else if (inst.highlighted >= 0 && inst.highlighted < items.length) {
+                        choose(id, inst.highlighted);
+                    }
+                    break;
+
+                case 'ArrowDown':
+                    e.preventDefault();
+                    if (!inst.isOpen) {
+                        open(id);
+                    } else if (items.length) {
+                        inst.highlighted = Math.min(inst.highlighted + 1, items.length - 1);
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (inst.isOpen && items.length) {
+                        inst.highlighted = Math.max(inst.highlighted - 1, 0);
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'Home':
+                    if (inst.isOpen && items.length) {
+                        inst.highlighted = 0;
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'End':
+                    if (inst.isOpen && items.length) {
+                        inst.highlighted = items.length - 1;
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'Tab':
+                    close(id);
+                    break;
+
+                default:
+                    if (e.key.length === 1 && /[a-zA-Z]/.test(e.key)) {
+                        handleLetterNav(id, e.key.toLowerCase());
+                    }
+                    break;
+            }
+        }
+
+        function onListClick(id, e) {
+            const li = e.target.closest('li[data-role]');
+            if (!li) return;
+
+            if (li.dataset.role === 'clear') clearSelection(id);
+            else if (li.dataset.role === 'option') choose(id, parseInt(li.dataset.index, 10));
+        }
+
+        function onDocumentClick(id, e) {
+            const inst = instances[id];
+            if (!inst || !inst.isOpen) return;
+            if (inst.wrapperEl.contains(e.target) || inst.listEl.contains(e.target)) return;
+            close(id);
+        }
+
+        function init(id, buttonEl, textEl, listEl, wrapperEl, options, allowReset, selectedValue, placeholder, dotNetRef) {
+            dispose(id); // re-init safe
+
+            const inst = {
+                buttonEl, textEl, listEl, wrapperEl, dotNetRef,
+                options, allowReset, placeholder,
+                selectedValue: selectedValue ?? null,
+                isOpen: false,
+                highlighted: -1,
+                searchString: ''
+            };
+            instances[id] = inst;
+
+            inst._clickHandler = () => toggle(id);
+            inst._keydownHandler = e => handleKeydown(id, e);
+            inst._focusOutHandler = () => {
+                // Mirrors the previous 150ms-delay blur-close, for keyboard tab-away. Mouse
+                // clicks outside are already covered by the document click listener below.
+                setTimeout(() => {
+                    if (inst.isOpen && document.activeElement !== inst.buttonEl && !inst.listEl.contains(document.activeElement)) {
+                        close(id);
+                    }
+                }, 150);
+            };
+            inst._listMouseDownHandler = e => e.preventDefault(); // keep focus on button while clicking the list
+            inst._listClickHandler = e => onListClick(id, e);
+            inst._docClickHandler = e => onDocumentClick(id, e);
+
+            buttonEl.addEventListener('click', inst._clickHandler);
+            buttonEl.addEventListener('keydown', inst._keydownHandler);
+            buttonEl.addEventListener('focusout', inst._focusOutHandler);
+            listEl.addEventListener('mousedown', inst._listMouseDownHandler);
+            listEl.addEventListener('click', inst._listClickHandler);
+            document.addEventListener('click', inst._docClickHandler, true);
+        }
+
+        function updateOptions(id, options, selectedValue) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.options = options;
+            inst.selectedValue = selectedValue ?? null;
+
+            setSelectedDisplay(inst);
+            if (inst.isOpen) render(inst);
+        }
+
+        function dispose(id) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.buttonEl.removeEventListener('click', inst._clickHandler);
+            inst.buttonEl.removeEventListener('keydown', inst._keydownHandler);
+            inst.buttonEl.removeEventListener('focusout', inst._focusOutHandler);
+            inst.listEl.removeEventListener('mousedown', inst._listMouseDownHandler);
+            inst.listEl.removeEventListener('click', inst._listClickHandler);
+            document.removeEventListener('click', inst._docClickHandler, true);
+
+            clearTimeout(inst._searchTimer);
+            if (inst.isOpen) detachFromBody(inst);
+
+            delete instances[id];
+        }
+
+        return { init, open, close, toggle, forceClose, updateOptions, dispose };
+    })();
+</script>

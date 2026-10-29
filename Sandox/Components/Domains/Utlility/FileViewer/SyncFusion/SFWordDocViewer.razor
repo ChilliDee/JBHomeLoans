@@ -1,0 +1,24 @@
+﻿@using System.IO
+@using System.Text.Json
+@using Syncfusion.Blazor.DocumentEditor
+
+<SfDocumentEditorContainer @ref="_container" EnableToolbar="true" Height="640px" >
+    <DocumentEditorContainerEvents Created="OnCreated"></DocumentEditorContainerEvents>
+</SfDocumentEditorContainer>
+
+@code {
+    [Parameter] public byte[] FileBytes { get; set; }
+
+    private SfDocumentEditorContainer _container;
+
+    public void OnCreated(object args)
+    {
+        using var stream = new MemoryStream(FileBytes);
+        var document = WordDocument.Load(stream, ImportFormatType.Docx);
+        var json = JsonSerializer.Serialize(document);
+        document.Dispose();
+        document = null;
+        _container.DocumentEditor.OpenAsync(json);
+        json = null;
+    }
+}

@@ -1,0 +1,168 @@
+﻿@* PaginationComponent.razor *@
+
+<div class="flex items-center justify-between">
+    <div class="flex-1 flex justify-between sm:hidden">
+        <!-- Mobile pagination -->
+        <button @onclick="PreviousPage"
+                disabled="@(CurrentPage <= 1)"
+                class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+            Previous
+        </button>
+        <button @onclick="NextPage"
+                disabled="@(CurrentPage >= TotalPages)"
+                class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+            Next
+        </button>
+    </div>
+
+    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+        <div>
+            <p class="text-sm text-gray-700">
+                Showing <span class="font-medium">@StartItem</span> to <span class="font-medium">@EndItem</span> of <span class="font-medium">@TotalItems</span> results
+            </p>
+        </div>
+
+        <div>
+            <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                <!-- Previous Button -->
+                <button @onclick="PreviousPage"
+                        disabled="@(CurrentPage <= 1)"
+                        class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+
+                <!-- Page Numbers -->
+                <div class="flex">
+                    @foreach (var pageInfo in GetPageNumbers())
+                    {
+                        @if (pageInfo.IsEllipsis)
+                        {
+                            <span class="relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white cursor-pointer text-sm font-medium text-gray-700">...</span>
+                        }
+                        else
+                        {
+                            <button @onclick="() => GoToPage(pageInfo.PageNumber)"
+                                    class="relative inline-flex items-center px-4 py-2 border text-sm font-medium @GetPageButtonClass(pageInfo.PageNumber) cursor-pointer">
+                                @pageInfo.PageNumber
+                            </button>
+                        }
+                    }
+                </div>
+
+                <!-- Next Button -->
+                <button @onclick="NextPage"
+                        disabled="@(CurrentPage >= TotalPages)"
+                        class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 cursor-pointer hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            </nav>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public int CurrentPage { get; set; } = 1;
+    [Parameter] public int TotalPages { get; set; }
+    [Parameter] public int TotalItems { get; set; }
+    [Parameter] public int ItemsPerPage { get; set; } = 100;
+    [Parameter] public Func<int, Task> OnPageChanged { get; set; }
+
+    // Calculate display items
+    private int StartItem => TotalItems == 0 ? 0 : ((CurrentPage - 1) * ItemsPerPage) + 1;
+    private int EndItem => Math.Min(CurrentPage * ItemsPerPage, TotalItems);
+
+    // Page info class for rendering
+    public class PageInfo
+    {
+        public int PageNumber { get; set; }
+        public bool IsEllipsis { get; set; }
+    }
+
+    private List<PageInfo> GetPageNumbers()
+    {
+        var pages = new List<PageInfo>();
+
+        if (TotalPages <= 7)
+        {
+            // Show all pages if 7 or fewer
+            for (int i = 1; i <= TotalPages; i++)
+            {
+                pages.Add(new PageInfo { PageNumber = i, IsEllipsis = false });
+            }
+        }
+        else
+        {
+            // Always show first page
+            pages.Add(new PageInfo { PageNumber = 1, IsEllipsis = false });
+
+            if (CurrentPage <= 4)
+            {
+                // Current page is near the beginning
+                for (int i = 2; i <= 5; i++)
+                {
+                    pages.Add(new PageInfo { PageNumber = i, IsEllipsis = false });
+                }
+                pages.Add(new PageInfo { IsEllipsis = true });
+                pages.Add(new PageInfo { PageNumber = TotalPages, IsEllipsis = false });
+            }
+            else if (CurrentPage >= TotalPages - 3)
+            {
+                // Current page is near the end
+                pages.Add(new PageInfo { IsEllipsis = true });
+                for (int i = TotalPages - 4; i <= TotalPages; i++)
+                {
+                    pages.Add(new PageInfo { PageNumber = i, IsEllipsis = false });
+                }
+            }
+            else
+            {
+                // Current page is in the middle
+                pages.Add(new PageInfo { IsEllipsis = true });
+                for (int i = CurrentPage - 1; i <= CurrentPage + 1; i++)
+                {
+                    pages.Add(new PageInfo { PageNumber = i, IsEllipsis = false });
+                }
+                pages.Add(new PageInfo { IsEllipsis = true });
+                pages.Add(new PageInfo { PageNumber = TotalPages, IsEllipsis = false });
+            }
+        }
+
+        return pages;
+    }
+
+    private string GetPageButtonClass(int pageNumber)
+    {
+        return pageNumber == CurrentPage
+            ? "z-10 bg-accent-50 border-accent-500 text-accent-600"
+            : "bg-white border-gray-300 text-gray-500 hover:bg-gray-50";
+    }
+
+    // Async event handler methods
+    private async Task PreviousPage()
+    {
+        if (CurrentPage > 1 && OnPageChanged != null)
+        {
+            await OnPageChanged(CurrentPage - 1);
+        }
+    }
+
+    private async Task NextPage()
+    {
+        if (CurrentPage < TotalPages && OnPageChanged != null)
+        {
+            await OnPageChanged(CurrentPage + 1);
+        }
+    }
+
+    private async Task GoToPage(int pageNumber)
+    {
+        if (pageNumber != CurrentPage && pageNumber >= 1 && pageNumber <= TotalPages && OnPageChanged != null)
+        {
+            await OnPageChanged(pageNumber);
+        }
+    }
+}

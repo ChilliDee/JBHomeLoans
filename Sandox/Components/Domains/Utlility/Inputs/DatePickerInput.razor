@@ -1,0 +1,750 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@using System.Globalization
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<div class="relative inline-block w-full" @ref="wrapperRef">
+
+    <!-- Input Field -->
+    <div class="relative">
+        <label for="@_instanceId" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">@Label</label>
+        @* Open/close, month navigation, and day-grid rendering are all owned by JS (SDP.init) —
+           nothing round-trips through the server just to open the calendar or flip a month.
+           Typing is a plain uncontrolled input (no @oninput binding) so keystrokes never
+           round-trip either. The ONLY server calls left are: a date actually being picked, and
+           the typed text being committed once focus truly leaves the widget — both of which need
+           .NET anyway (ValueChanged/AsyncCallBack/CallBack/OnChangeValidation/CustomValidation). *@
+        <input type="text"
+               id="@_instanceId"
+               name="@Name"
+               @ref="inputRef"
+               placeholder="@Placeholder"
+               readonly="@(ReadOnly || IsDisabled)"
+               disabled="@IsDisabled"
+               class="w-full px-3 py-2 border rounded-md shadow-sm text-sm focus:outline-none focus:ring-2 @(GetInputClasses())" />
+
+        <!-- Calendar Icon -->
+        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+            <svg class="w-5 h-5 @(IsDisabled ? "text-gray-300" : "text-gray-400")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+        </div>
+    </div>
+
+    <!-- Error Message -->
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">
+            @errorMessage
+        </div>
+    }
+
+    @* Always rendered (hidden by default) so JS has a stable element to attach to and populate.
+       Month header, day-of-week row, day grid, and the Today button are all built by JS. *@
+    <div class="absolute top-full left-0 mt-1 bg-white border border-gray-300 rounded-md shadow-lg z-50 p-4 min-w-max"
+         style="display:none;"
+         @ref="popupRef">
+    </div>
+
+</div>
+
+@code {
+    [Parameter] public DateTime? Value { get; set; }
+    [Parameter] public EventCallback<DateTime?> ValueChanged { get; set; }
+    [Parameter] public EventCallback AsyncCallBack { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "dd/MM/yyyy";
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public bool ReadOnly { get; set; } = false;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public DateTime? MinDate { get; set; }
+    [Parameter] public DateTime? MaxDate { get; set; }
+    [Parameter] public string DateFormat { get; set; } = "dd/MM/yyyy";
+    [Parameter] public string Label { get; set; } = "Date";
+
+    /// <summary>
+    /// Optional. Used only as a readable prefix for the generated instance id (helps when
+    /// inspecting the DOM / debugging). Does NOT need to be unique — uniqueness is guaranteed
+    /// internally via a GUID suffix. The JS module keys its instance dictionary off this id, so a
+    /// collision would let one date picker's open/close hijack another's.
+    /// </summary>
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When true, only dates strictly after today are selectable. Today is excluded.
+    /// The "Today" button is hidden automatically.
+    /// </summary>
+    [Parameter] public bool FutureDatesOnly { get; set; } = false;
+
+    [Parameter] public bool? Required { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    /// <summary>
+    /// Pass your code-behind RemoveValidator method here. The component removes
+    /// its own Validate method from your list on dispose.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationUnref { get; set; }
+
+    /// <summary>
+    /// Runs every time the value changes. Return (false, "error message") to show an inline error.
+    /// Does not participate in the ValidationRef flow.
+    /// </summary>
+    [Parameter] public Func<Task<(bool IsValid, string ErrorMessage)>>? OnChangeValidation { get; set; }
+
+    /// <summary>
+    /// Runs as part of the ValidationRef flow when ValidateAll() is called.
+    /// Return (false, "error message") to fail validation.
+    /// </summary>
+    [Parameter] public Func<Task<(bool IsValid, string ErrorMessage)>>? CustomValidation { get; set; }
+
+    // -------------------------------------------------------------------------
+    // Private state
+    // -------------------------------------------------------------------------
+
+    private ElementReference wrapperRef;
+    private ElementReference inputRef;
+    private ElementReference popupRef;
+    private DotNetObjectReference<DatePickerInput>? dotNetRef;
+    private string inputValue = "";
+    private bool isInvalid = false;
+    private string errorMessage = "";
+    private bool isDisposed = false;
+    private bool _initialised = false;
+    private DateTime? _previousMinDate;
+    private DateTime? _previousMaxDate;
+    private bool _previousFutureDatesOnly;
+
+    // Guaranteed-unique key for this instance — used for the DOM id/for attributes and every
+    // SDP.* JS call. Generated once per component instance so it survives re-renders.
+    private string _instanceId = string.Empty;
+
+    // -------------------------------------------------------------------------
+    // Computed
+    // -------------------------------------------------------------------------
+
+    private bool IsDisabled => Disabled;
+
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
+
+    protected override void OnInitialized()
+    {
+        _instanceId = string.IsNullOrWhiteSpace(Id)
+            ? $"sdp-{Guid.NewGuid():N}"
+            : $"{Id}-{Guid.NewGuid():N}";
+
+        if (Value.HasValue)
+        {
+            inputValue = Value.Value.ToString(DateFormat);
+        }
+
+        _previousMinDate = MinDate;
+        _previousMaxDate = MaxDate;
+        _previousFutureDatesOnly = FutureDatesOnly;
+
+        dotNetRef = DotNetObjectReference.Create(this);
+        ValidationRef?.Invoke(Validate);
+
+        // Catch a pre-populated/default Value that's already outside MinDate/MaxDate/FutureDatesOnly
+        // so it renders as invalid immediately, rather than only on submit or user interaction.
+        Validate();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (isDisposed) return;
+
+        if (firstRender)
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("SDP.init", _instanceId, inputRef, popupRef, wrapperRef, BuildInitPayload(), dotNetRef);
+                _initialised = true;
+            }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException) { }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // JS-invokable — the only two paths back to .NET from user interaction.
+    // -------------------------------------------------------------------------
+
+    [JSInvokable]
+    public async Task OnDateSelected(string isoDate)
+    {
+        if (isDisposed) return;
+
+        if (!DateTime.TryParseExact(isoDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return;
+
+        if (!IsDateSelectable(date)) return;
+
+        await SetValue(date.Date);
+        inputValue = date.ToString(DateFormat);
+        ClearValidationError();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnCommit(string typedValue)
+    {
+        if (isDisposed) return;
+
+        inputValue = typedValue ?? "";
+        await ValidateAndSetDate();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // -------------------------------------------------------------------------
+    // Date parsing & setting
+    // -------------------------------------------------------------------------
+
+    private async Task ValidateAndSetDate()
+    {
+        if (string.IsNullOrWhiteSpace(inputValue))
+        {
+            await SetValue(null);
+            ClearValidationError();
+            return;
+        }
+
+        var formats = new[] { "dd/MM/yyyy", "d/M/yyyy", "dd/M/yyyy", "d/MM/yyyy", "dd-MM-yyyy", "d-M-yyyy" };
+
+        DateTime parsed = DateTime.MinValue;
+        bool isValid = false;
+
+        foreach (var format in formats)
+        {
+            if (DateTime.TryParseExact(inputValue, format, CultureInfo.InvariantCulture, DateTimeStyles.None, out parsed))
+            {
+                isValid = true;
+                break;
+            }
+        }
+
+        if (!isValid)
+            isValid = DateTime.TryParse(inputValue, out parsed);
+
+        if (isValid)
+        {
+            var dateOnly = parsed.Date;
+            if (IsDateSelectable(dateOnly))
+            {
+                await SetValue(dateOnly);
+                inputValue = dateOnly.ToString(DateFormat);
+                ClearValidationError();
+            }
+            else
+            {
+                SetValidationError(GetDateRangeError(dateOnly));
+            }
+        }
+        else
+        {
+            SetValidationError("Please enter a valid date in dd/MM/yyyy format");
+        }
+    }
+
+    private async Task SetValue(DateTime? newValue)
+    {
+        Value = newValue;
+        await ValueChanged.InvokeAsync(Value);
+        await AsyncCallBack.InvokeAsync();
+        CallBack?.Invoke();
+
+        if (OnChangeValidation != null)
+        {
+            var result = await OnChangeValidation();
+            if (!result.IsValid)
+            {
+                SetValidationError(result.ErrorMessage);
+            }
+            else
+            {
+                ClearValidationError();
+            }
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Validation
+    // -------------------------------------------------------------------------
+
+    private void ClearValidationError()
+    {
+        isInvalid = false;
+        errorMessage = "";
+    }
+
+    private void SetValidationError(string message)
+    {
+        isInvalid = true;
+        errorMessage = message;
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (isDisposed) return (true, Label);
+
+        if (Required == true && !Value.HasValue)
+        {
+            isInvalid = true;
+            errorMessage = "This field is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (Value.HasValue && !IsDateSelectable(Value.Value))
+        {
+            isInvalid = true;
+            errorMessage = GetDateRangeError(Value.Value);
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (CustomValidation != null)
+        {
+            var result = CustomValidation().GetAwaiter().GetResult();
+            if (!result.IsValid)
+            {
+                isInvalid = true;
+                errorMessage = result.ErrorMessage;
+                StateHasChanged();
+                return (false, Label);
+            }
+        }
+
+        isInvalid = false;
+        errorMessage = "";
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private string GetDateRangeError(DateTime date)
+    {
+        if (FutureDatesOnly && date.Date <= DateTime.Today)
+            return "Please select a future date";
+        if (MinDate.HasValue && date.Date < MinDate.Value.Date)
+            return $"Date must be on or after {MinDate.Value.ToString(DateFormat)}";
+        if (MaxDate.HasValue && date.Date > MaxDate.Value.Date)
+            return $"Date must be on or before {MaxDate.Value.ToString(DateFormat)}";
+        return "Date is not within the allowed range";
+    }
+
+    // -------------------------------------------------------------------------
+    // Selectability
+    // -------------------------------------------------------------------------
+
+    private bool IsDateSelectable(DateTime date)
+    {
+        if (FutureDatesOnly && date.Date <= DateTime.Today) return false;
+        if (MinDate.HasValue && date.Date < MinDate.Value.Date) return false;
+        if (MaxDate.HasValue && date.Date > MaxDate.Value.Date) return false;
+        return true;
+    }
+
+    // -------------------------------------------------------------------------
+    // JS payload building
+    // -------------------------------------------------------------------------
+
+    private string[] GetDaysOfWeek()
+    {
+        var culture = CultureInfo.CurrentCulture;
+        var dayNames = new string[7];
+        var firstDayOfWeek = (int)culture.DateTimeFormat.FirstDayOfWeek;
+
+        for (int i = 0; i < 7; i++)
+        {
+            var dayOfWeek = (DayOfWeek)((firstDayOfWeek + i) % 7);
+            dayNames[i] = culture.DateTimeFormat.GetAbbreviatedDayName(dayOfWeek);
+        }
+
+        return dayNames;
+    }
+
+    private object BuildInitPayload() => new
+    {
+        minDate = MinDate?.ToString("yyyy-MM-dd"),
+        maxDate = MaxDate?.ToString("yyyy-MM-dd"),
+        futureDatesOnly = FutureDatesOnly,
+        dateFormat = DateFormat,
+        placeholder = Placeholder,
+        value = Value?.ToString("yyyy-MM-dd"),
+        today = DateTime.Today.ToString("yyyy-MM-dd"),
+        firstDayOfWeek = (int)CultureInfo.CurrentCulture.DateTimeFormat.FirstDayOfWeek,
+        dayNames = GetDaysOfWeek(),
+        monthNames = Enumerable.Range(1, 12).Select(m => CultureInfo.CurrentCulture.DateTimeFormat.GetMonthName(m)).ToArray(),
+        showTodayButton = !FutureDatesOnly,
+        readOnly = ReadOnly,
+        disabled = IsDisabled
+    };
+
+    // -------------------------------------------------------------------------
+    // Parameter sync — pushes external Value/MinDate/MaxDate/FutureDatesOnly changes into JS.
+    // -------------------------------------------------------------------------
+
+    public override async Task SetParametersAsync(ParameterView parameters)
+    {
+        var newValue = parameters.GetValueOrDefault<DateTime?>(nameof(Value));
+        var newMinDate = parameters.GetValueOrDefault<DateTime?>(nameof(MinDate));
+        var newMaxDate = parameters.GetValueOrDefault<DateTime?>(nameof(MaxDate));
+        var newFutureDatesOnly = parameters.GetValueOrDefault<bool>(nameof(FutureDatesOnly));
+
+        var valueChanged = newValue != Value;
+        var constraintsChanged = newMinDate != _previousMinDate || newMaxDate != _previousMaxDate || newFutureDatesOnly != _previousFutureDatesOnly;
+
+        _previousMinDate = newMinDate;
+        _previousMaxDate = newMaxDate;
+        _previousFutureDatesOnly = newFutureDatesOnly;
+
+        if (valueChanged)
+        {
+            inputValue = newValue?.ToString(DateFormat) ?? "";
+        }
+
+        await base.SetParametersAsync(parameters);
+
+        if (_initialised && (valueChanged || constraintsChanged))
+        {
+            try
+            {
+                await JSRuntime.InvokeVoidAsync("SDP.updateOptions", _instanceId, BuildInitPayload());
+            }
+            catch (JSDisconnectedException) { }
+            catch (TaskCanceledException) { }
+        }
+
+        if (valueChanged)
+        {
+            StateHasChanged();
+        }
+    }
+
+    private string GetInputClasses()
+    {
+        if (IsDisabled)
+            return "bg-gray-50 text-gray-400 cursor-not-allowed border-gray-200";
+
+        if (Highlight)
+            return "text-gray-900 border-amber-400 focus:ring-amber-500 focus:border-amber-500";
+
+        if (isInvalid)
+            return "bg-white border-red-500 focus:ring-red-500 focus:border-red-500";
+
+        return "bg-white border-gray-300 focus:ring-accent-500 focus:border-accent-500";
+    }
+
+    // -------------------------------------------------------------------------
+    // Dispose
+    // -------------------------------------------------------------------------
+
+    public async ValueTask DisposeAsync()
+    {
+        if (isDisposed) return;
+        isDisposed = true;
+
+        ValidationUnref?.Invoke(Validate);
+
+        try { await JSRuntime.InvokeVoidAsync("SDP.dispose", _instanceId); }
+        catch (JSDisconnectedException) { }
+        catch (TaskCanceledException) { }
+
+        dotNetRef?.Dispose();
+        dotNetRef = null;
+    }
+}
+
+<script>
+    // SDP = Simple Date Picker. One module, one instance per component (keyed by the
+    // guaranteed-unique instance id passed from .NET). Open/close, month navigation, day-grid
+    // rendering/highlighting, and click-outside are all client-side. The ONLY times this talks
+    // back to .NET are: a day (or Today) actually being clicked, and the typed text being
+    // committed once focus truly leaves the widget (blur/Escape/click-elsewhere/tab-away) — both
+    // paths that genuinely need server-side parsing/validation logic.
+    window.SDP = window.SDP || (function() {
+        const instances = {};
+
+        function esc(s) {
+            return (s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function pad2(n) { return String(n).padStart(2, '0'); }
+
+        function formatDate(isoDate, format) {
+            if (!isoDate) return '';
+            const [y, m, d] = isoDate.split('-').map(Number);
+            return format
+                .replace(/yyyy/g, String(y))
+                .replace(/yy/g, String(y).slice(-2))
+                .replace(/MM/g, pad2(m))
+                .replace(/M/g, String(m))
+                .replace(/dd/g, pad2(d))
+                .replace(/d/g, String(d));
+        }
+
+        function isSelectable(inst, isoDate) {
+            if (inst.futureDatesOnly && isoDate <= inst.today) return false;
+            if (inst.minDate && isoDate < inst.minDate) return false;
+            if (inst.maxDate && isoDate > inst.maxDate) return false;
+            return true;
+        }
+
+        function daysInMonth(year, month) {
+            // month is 1-based; Date(year, month, 0) rolls back to the last day of that month.
+            return new Date(year, month, 0).getDate();
+        }
+
+        function buildDays(inst) {
+            const { year, month } = inst.cursor;
+            const firstOfMonth = new Date(year, month - 1, 1);
+            const jsDow = firstOfMonth.getDay();
+            const offset = (jsDow - inst.firstDayOfWeek + 7) % 7;
+            const start = new Date(year, month - 1, 1 - offset);
+
+            const days = [];
+            for (let i = 0; i < 42; i++) {
+                const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+                const iso = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+                days.push({
+                    iso,
+                    day: d.getDate(),
+                    isCurrentMonth: (d.getMonth() + 1) === month && d.getFullYear() === year,
+                    isSelected: inst.selectedDate === iso,
+                    isToday: inst.today === iso,
+                    selectable: isSelectable(inst, iso)
+                });
+            }
+            return days;
+        }
+
+        function dayClasses(day) {
+            let classes = "w-8 h-8 text-sm rounded-full flex items-center justify-center transition-colors ";
+            if (!day.isCurrentMonth) {
+                classes += "text-gray-300 cursor-not-allowed ";
+            } else if (!day.selectable) {
+                classes += "text-gray-400 cursor-not-allowed ";
+            } else {
+                classes += "hover:bg-accent-100 cursor-pointer ";
+                if (day.isSelected) classes += "bg-accent-600 text-white hover:bg-accent-700 ";
+                else if (day.isToday) classes += "bg-accent-100 text-accent-600 font-semibold ";
+                else classes += "text-gray-900 ";
+            }
+            return classes.trim();
+        }
+
+        function render(inst) {
+            const monthLabel = esc(inst.monthNames[inst.cursor.month - 1]) + ' ' + inst.cursor.year;
+            const days = buildDays(inst);
+
+            let html = '';
+
+            html += '<div class="flex items-center justify-between mb-4">'
+                + '<button type="button" data-role="prev" class="p-1 hover:bg-gray-100 rounded">'
+                + '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" /></svg>'
+                + '</button>'
+                + '<div class="font-semibold text-gray-900">' + monthLabel + '</div>'
+                + '<button type="button" data-role="next" class="p-1 hover:bg-gray-100 rounded">'
+                + '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>'
+                + '</button>'
+                + '</div>';
+
+            html += '<div class="grid grid-cols-7 gap-1 mb-2">';
+            inst.dayNames.forEach(dn => {
+                html += '<div class="text-center text-sm font-medium text-gray-500 py-2">' + esc(dn) + '</div>';
+            });
+            html += '</div>';
+
+            html += '<div class="grid grid-cols-7 gap-1">';
+            days.forEach(day => {
+                const disabled = (!day.isCurrentMonth || !day.selectable) ? 'disabled' : '';
+                html += '<button type="button" data-role="day" data-date="' + day.iso + '" ' + disabled + ' class="' + dayClasses(day) + '">' + day.day + '</button>';
+            });
+            html += '</div>';
+
+            if (inst.showTodayButton) {
+                html += '<div class="mt-4 pt-3 border-t border-gray-200">'
+                    + '<button type="button" data-role="today" class="w-full px-3 py-2 text-sm bg-accent-600 text-white rounded-md hover:bg-accent-700 focus:outline-none focus:ring-2 focus:ring-accent-500">Today</button>'
+                    + '</div>';
+            }
+
+            inst.popupEl.innerHTML = html;
+        }
+
+        function setInputDisplay(inst) {
+            inst.inputEl.value = inst.selectedDate ? formatDate(inst.selectedDate, inst.dateFormat) : '';
+        }
+
+        function open(id) {
+            const inst = instances[id];
+            if (!inst || inst.isOpen || inst.disabled || inst.readOnly) return;
+
+            inst.isOpen = true;
+            inst.cursor = inst.selectedDate
+                ? { year: Number(inst.selectedDate.slice(0, 4)), month: Number(inst.selectedDate.slice(5, 7)) }
+                : { year: Number(inst.today.slice(0, 4)), month: Number(inst.today.slice(5, 7)) };
+
+            render(inst);
+            inst.popupEl.style.display = 'block';
+        }
+
+        function close(id) {
+            const inst = instances[id];
+            if (!inst || !inst.isOpen) return;
+
+            inst.isOpen = false;
+            inst.popupEl.style.display = 'none';
+        }
+
+        function toggle(id) {
+            const inst = instances[id];
+            if (!inst) return;
+            inst.isOpen ? close(id) : open(id);
+        }
+
+        function forceClose(id) {
+            close(id);
+        }
+
+        function commit(id) {
+            const inst = instances[id];
+            if (!inst) return;
+            close(id);
+            inst.dotNetRef.invokeMethodAsync('OnCommit', inst.inputEl.value);
+        }
+
+        function chooseDate(id, isoDate) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            const days = buildDays(inst);
+            const day = days.find(d => d.iso === isoDate);
+            if (!day || !day.isCurrentMonth || !day.selectable) return;
+
+            inst.selectedDate = isoDate;
+            setInputDisplay(inst);
+            close(id);
+
+            inst.dotNetRef.invokeMethodAsync('OnDateSelected', isoDate);
+        }
+
+        function chooseToday(id) {
+            const inst = instances[id];
+            if (!inst) return;
+            if (!isSelectable(inst, inst.today)) return;
+            chooseDate(id, inst.today);
+        }
+
+        function navigate(id, delta) {
+            const inst = instances[id];
+            if (!inst || !inst.isOpen) return;
+
+            let { year, month } = inst.cursor;
+            month += delta;
+            if (month < 1) { month = 12; year -= 1; }
+            else if (month > 12) { month = 1; year += 1; }
+            inst.cursor = { year, month };
+            render(inst);
+        }
+
+        function onPopupClick(id, e) {
+            const btn = e.target.closest('button[data-role]');
+            if (!btn) return;
+
+            if (btn.dataset.role === 'prev') navigate(id, -1);
+            else if (btn.dataset.role === 'next') navigate(id, 1);
+            else if (btn.dataset.role === 'today') chooseToday(id);
+            else if (btn.dataset.role === 'day' && !btn.disabled) chooseDate(id, btn.dataset.date);
+        }
+
+        function init(id, inputEl, popupEl, wrapperEl, options, dotNetRef) {
+            dispose(id); // re-init safe
+
+            const inst = {
+                inputEl, popupEl, wrapperEl, dotNetRef,
+                minDate: options.minDate ?? null,
+                maxDate: options.maxDate ?? null,
+                futureDatesOnly: !!options.futureDatesOnly,
+                dateFormat: options.dateFormat,
+                placeholder: options.placeholder,
+                selectedDate: options.value ?? null,
+                today: options.today,
+                firstDayOfWeek: options.firstDayOfWeek,
+                dayNames: options.dayNames,
+                monthNames: options.monthNames,
+                showTodayButton: !!options.showTodayButton,
+                readOnly: !!options.readOnly,
+                disabled: !!options.disabled,
+                isOpen: false,
+                cursor: { year: Number(options.today.slice(0, 4)), month: Number(options.today.slice(5, 7)) }
+            };
+            instances[id] = inst;
+
+            setInputDisplay(inst);
+
+            inst._clickHandler = () => toggle(id);
+            inst._keydownHandler = e => {
+                if (e.key === 'Escape') { e.preventDefault(); commit(id); }
+                else if (e.key === 'Enter') { e.preventDefault(); commit(id); inputEl.blur(); }
+            };
+            // Prevent day/nav/today button clicks from stealing focus from the input, so
+            // focusout below only ever fires for genuine "user left the whole widget" cases.
+            inst._popupMouseDownHandler = e => e.preventDefault();
+            inst._popupClickHandler = e => onPopupClick(id, e);
+            inst._focusOutHandler = () => {
+                setTimeout(() => {
+                    if (!document.body.contains(wrapperEl)) return;
+                    if (!wrapperEl.contains(document.activeElement)) {
+                        commit(id);
+                    }
+                }, 150);
+            };
+
+            inputEl.addEventListener('click', inst._clickHandler);
+            inputEl.addEventListener('keydown', inst._keydownHandler);
+            inputEl.addEventListener('focusout', inst._focusOutHandler);
+            popupEl.addEventListener('mousedown', inst._popupMouseDownHandler);
+            popupEl.addEventListener('click', inst._popupClickHandler);
+        }
+
+        function updateOptions(id, options) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.minDate = options.minDate ?? null;
+            inst.maxDate = options.maxDate ?? null;
+            inst.futureDatesOnly = !!options.futureDatesOnly;
+            inst.selectedDate = options.value ?? null;
+            inst.readOnly = !!options.readOnly;
+            inst.disabled = !!options.disabled;
+
+            setInputDisplay(inst);
+            if (inst.isOpen) render(inst);
+        }
+
+        function dispose(id) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.inputEl.removeEventListener('click', inst._clickHandler);
+            inst.inputEl.removeEventListener('keydown', inst._keydownHandler);
+            inst.inputEl.removeEventListener('focusout', inst._focusOutHandler);
+            inst.popupEl.removeEventListener('mousedown', inst._popupMouseDownHandler);
+            inst.popupEl.removeEventListener('click', inst._popupClickHandler);
+
+            delete instances[id];
+        }
+
+        return { init, open, close, toggle, forceClose, updateOptions, dispose };
+    })();
+</script>

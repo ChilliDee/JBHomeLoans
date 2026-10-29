@@ -1,0 +1,41 @@
+<div id="@_d.I.ClassName" class="bg-white">
+    @if (_d.I.InitialisationCompleted == false || _d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestIsLoading)
+    {
+        <div class="flex items-center justify-center gap-3 p-6 text-sm text-slate-500">
+            <svg class="animate-spin w-4 h-4 text-amber-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+            Loading...
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasFailed)
+    {
+        <div class="mx-4 my-3 flex items-start gap-3 p-4 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+            <svg class="w-4 h-4 mt-0.5 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+            </svg>
+            @_d.RC_Internal.Initialise_HD_.ResponseData.ErrorMessage
+        </div>
+    }
+    else if (_d.RC_Internal.Initialise_HD_.ResponseData.RequestStatus.RequestHasCompleted)
+    {
+        <div class="mx-auto max-w-7xl px-6 py-24 md:py-32 lg:px-8">
+            <p class="text-sm font-semibold uppercase tracking-widest text-amber-600">Customer stories</p>
+            <h2 class="mt-4 max-w-3xl text-4xl font-black leading-tight tracking-tight text-slate-950 md:text-6xl">
+                Drivers who have been down this road.
+            </h2>
+
+            <div class="mt-16 grid grid-cols-1 gap-6 md:grid-cols-3">
+                @foreach (var review in _d.I.Inputs.Items)
+                {
+                    <figure class="flex flex-col rounded-3xl bg-slate-50 p-8 md:p-10">
+                        <span class="block h-10 text-7xl font-black leading-none text-amber-400" aria-hidden="true">&ldquo;</span>
+                        <blockquote class="mt-6 flex-1 text-lg leading-relaxed text-slate-800">@review.Description</blockquote>
+                        <figcaption class="mt-8 border-t border-slate-200 pt-6 text-base font-semibold text-slate-950">@review.Title</figcaption>
+                    </figure>
+                }
+            </div>
+        </div>
+    }
+</div>

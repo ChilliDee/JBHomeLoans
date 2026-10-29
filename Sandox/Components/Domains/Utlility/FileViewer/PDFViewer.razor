@@ -1,0 +1,66 @@
+﻿@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<iframe src="@_src" style="width:@Width; height:@Height; border:none;" />
+
+@code {
+    [Parameter] public byte[] FileBytes { get; set; }
+    [Parameter] public string Width { get; set; } = "100%";
+    [Parameter] public string Height { get; set; } = "600px";
+
+    private string _src;
+    private string _previousBlobUrl;
+    private bool _jsInitialised;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_jsInitialised)
+        {
+            await JS.InvokeVoidAsync("eval",
+                "window._pdfViewer = {" +
+                "  createBlobUrl: function(bytes) {" +
+                "    var blob = new Blob([new Uint8Array(bytes)], { type: 'application/pdf' });" +
+                "    return URL.createObjectURL(blob);" +
+                "  }," +
+                "  revokeBlobUrl: function(url) { if (url) URL.revokeObjectURL(url); }" +
+                "};");
+            _jsInitialised = true;
+
+            if (FileBytes is { Length: > 0 })
+            {
+                await LoadPdfAsync();
+                StateHasChanged();
+            }
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_jsInitialised && FileBytes is { Length: > 0 })
+        {
+            await LoadPdfAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadPdfAsync()
+    {
+        await RevokePreviousBlobUrlAsync();
+        _src = await JS.InvokeAsync<string>("_pdfViewer.createBlobUrl", FileBytes);
+        _previousBlobUrl = _src;
+    }
+
+    private async Task RevokePreviousBlobUrlAsync()
+    {
+        if (!string.IsNullOrEmpty(_previousBlobUrl))
+        {
+            await JS.InvokeVoidAsync("_pdfViewer.revokeBlobUrl", _previousBlobUrl);
+            _previousBlobUrl = null;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await RevokePreviousBlobUrlAsync();
+    }
+}

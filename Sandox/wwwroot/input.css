@@ -1,0 +1,47 @@
+﻿@import "tailwindcss";
+
+@theme {
+  --animate-processing-pulse: processing-pulse 1.4s ease-in-out infinite;
+
+  /* Accent colour used by the shared components in Components/Domains/Utlility
+     (inputs, dropdowns, date pickers, modals, pagination, graphs, splitters).
+     They use bg-accent-600, ring-accent-500, text-accent-700 and so on instead of a fixed colour.
+     Default: indigo, the CRM look. A site replaces it with its own palette below. */
+  --color-accent-50: oklch(96.2% 0.018 272.314);
+  --color-accent-100: oklch(93% 0.034 272.788);
+  --color-accent-200: oklch(87% 0.065 274.039);
+  --color-accent-300: oklch(78.5% 0.115 274.713);
+  --color-accent-400: oklch(67.3% 0.182 276.935);
+  --color-accent-500: oklch(58.5% 0.233 277.117);
+  --color-accent-600: oklch(51.1% 0.262 276.966);
+  --color-accent-700: oklch(45.7% 0.24 277.023);
+  --color-accent-800: oklch(39.8% 0.195 277.366);
+  --color-accent-900: oklch(35.9% 0.144 278.697);
+  --color-accent-950: oklch(25.7% 0.09 281.288);
+}
+
+/* SITE ACCENTS ===================================================================================
+   Each site sets its accent once: a class here holding all eleven shades, put on the root element
+   of each of that site's pages (the <Area>_P_C root div). Everything inside the page then follows.
+   Keep all eleven shades: the shared components use 50 to 900. */
+
+/* JJ's Vehicle Finance: amber */
+.site-jjs-vehicle-finance {
+  --color-accent-50: oklch(98.7% 0.022 95.277);
+  --color-accent-100: oklch(96.2% 0.059 95.617);
+  --color-accent-200: oklch(92.4% 0.12 95.746);
+  --color-accent-300: oklch(87.9% 0.169 91.605);
+  --color-accent-400: oklch(82.8% 0.189 84.429);
+  --color-accent-500: oklch(76.9% 0.188 70.08);
+  --color-accent-600: oklch(66.6% 0.179 58.318);
+  --color-accent-700: oklch(55.5% 0.163 48.998);
+  --color-accent-800: oklch(47.3% 0.137 46.201);
+  --color-accent-900: oklch(41.4% 0.112 45.904);
+  --color-accent-950: oklch(27.9% 0.077 45.635);
+}
+/* ================================================================================================ */
+
+@keyframes processing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}

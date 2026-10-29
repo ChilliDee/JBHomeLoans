@@ -1,0 +1,669 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@implements IDisposable
+
+<div class="relative" @ref="dropdownWrapperRef" data-dd-id="@_instanceId">
+    <label for="@_instanceId" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") z-10">
+        @Label
+    </label>
+
+    <div class="relative">
+        <input type="text"
+               id="@_instanceId"
+               name="@Name"
+               disabled="@IsDisabled"
+               @ref="inputRef"
+               value="@GetInputDisplayValue()"
+               placeholder="@Placeholder"
+               autocomplete="off"
+               class="block w-full rounded-md px-3 py-1.5 pr-10 text-base outline-1 -outline-offset-1 sm:text-sm/6 text-gray-900 placeholder:text-gray-400 @(GetInputClasses())" />
+        @* Typing, focus, and keyboard handling are wired up in JS (SDD.init) rather than via
+           @oninput/@onfocus/@onkeydown, so none of it round-trips through the server. *@
+
+        <button type="button"
+                disabled="@IsDisabled"
+                onclick="SDD.toggle('@_instanceId')"
+                onmousedown="event.preventDefault()"
+                class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-auto">
+            <svg class="size-5 @(IsDisabled ? "text-gray-300" : "text-gray-400")" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
+            </svg>
+        </button>
+    </div>
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+
+    @* Always rendered (hidden by default) so JS has a stable element to attach to the body and
+       populate. Open/closed state, filtering, and highlighting are all owned by JS from here on. *@
+    <ul class="max-h-[240px] overflow-auto rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black/5 focus:outline-hidden sm:text-sm"
+        style="display:none;"
+        tabindex="-1"
+        role="listbox"
+        aria-labelledby="@_instanceId"
+        @ref="dropdownListRef">
+    </ul>
+</div>
+
+@code {
+
+    [Parameter] public SingleSelectDropDownWithSearchOption? SelectedOption { get; set; }
+    [Parameter] public IEnumerable<SingleSelectDropDownWithSearchOption> Options { get; set; } = null!;
+    [Parameter] public EventCallback<SingleSelectDropDownWithSearchOption?> AsyncCallBack { get; set; }
+    [Parameter] public Action<SingleSelectDropDownWithSearchOption?>? OnChange { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Optional. Used only as a readable prefix for the generated instance id (helps when
+    /// inspecting the DOM / debugging). Does NOT need to be unique — uniqueness is guaranteed
+    /// internally via a GUID suffix, so multiple instances on the same page (e.g. one per table
+    /// row) can safely share the same Id value without colliding.
+    /// </summary>
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "Select an option...";
+    [Parameter] public EventCallback<SingleSelectDropDownWithSearchOption?> SelectedOptionChanged { get; set; }
+    [Parameter] public bool AllowReset { get; set; } = false;
+    [Parameter] public bool HighlightWhenSelected { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool AutoOpen { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    /// <summary>
+    /// Pass your code-behind RemoveValidator method here. The component removes
+    /// its own Validate method from your list on dispose.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationUnref { get; set; }
+
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+    private SingleSelectDropDownWithSearchOption? _previousSelectedOption;
+    private IEnumerable<SingleSelectDropDownWithSearchOption>? _previousOptions;
+    private ElementReference dropdownListRef;
+    private ElementReference dropdownWrapperRef;
+    private ElementReference inputRef;
+    private bool _previousAutoOpen = false;
+    private DotNetObjectReference<SingleSelectDropDownWithSearch>? _dotNetRef;
+    private bool _isDisposed = false;
+    private bool _initialised = false;
+
+    // Guaranteed-unique key for this instance — used for the DOM id/for attributes, the
+    // data-dd-id marker, and every SDD.* JS call. Generated once per component instance so it
+    // survives re-renders. This is deliberately NOT just "Id" from the caller: two instances of
+    // this component (e.g. one per table row) commonly share the same caller-supplied Id, which
+    // would otherwise collide in both the DOM (duplicate id attributes) and in the JS module's
+    // `instances` dictionary (the second init() would tear down the first instance's listeners).
+    private string _instanceId = string.Empty;
+
+    [Inject] private IJSRuntime JSRuntime { get; set; } = default!;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        _instanceId = string.IsNullOrWhiteSpace(Id)
+            ? $"ssdws-{Guid.NewGuid():N}"
+            : $"{Id}-{Guid.NewGuid():N}";
+
+        ValidationRef?.Invoke(Validate);
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (_isDisposed) return (true, Label);
+
+        if (Required && SelectedOption == null)
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required.";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        if (_isDisposed) return;
+
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+
+            await JSRuntime.InvokeVoidAsync(
+                "SDD.init",
+                _instanceId,
+                inputRef,
+                dropdownListRef,
+                dropdownWrapperRef,
+                BuildOptionsPayload(),
+                AllowReset,
+                SelectedOption?.Id ?? 0,
+                SelectedOption?.Value,
+                _dotNetRef);
+
+            _initialised = true;
+        }
+
+        // AutoOpen handling — this is a server-driven "open this for the user" signal, so it
+        // still goes through interop, but it's a one-off call rather than a per-keystroke one.
+        if (AutoOpen && !_previousAutoOpen)
+        {
+            _previousAutoOpen = true;
+
+            if (!IsDisabled && Options != null && Options.Any())
+            {
+                await JSRuntime.InvokeVoidAsync("SDD.open", _instanceId);
+            }
+        }
+        else if (!AutoOpen && _previousAutoOpen)
+        {
+            _previousAutoOpen = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+
+        ValidationUnref?.Invoke(Validate);
+
+        try { JSRuntime.InvokeVoidAsync("SDD.dispose", _instanceId); }
+        catch { }
+
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
+    }
+
+    public override async Task SetParametersAsync(ParameterView parameters)
+    {
+        var newSelectedOption = parameters.GetValueOrDefault<SingleSelectDropDownWithSearchOption?>(nameof(SelectedOption));
+        var newOptions = parameters.GetValueOrDefault<IEnumerable<SingleSelectDropDownWithSearchOption>>(nameof(Options));
+
+        var selectionChanged = newSelectedOption != _previousSelectedOption;
+        var optionsChanged = !ReferenceEquals(newOptions, _previousOptions);
+
+        _previousSelectedOption = newSelectedOption;
+        _previousOptions = newOptions;
+
+        await base.SetParametersAsync(parameters);
+
+        // Keep the JS-owned copy of options/selection in sync when the parent changes them
+        // programmatically. This is not a per-keystroke path, so the round trip is fine here.
+        if (_initialised && (selectionChanged || optionsChanged))
+        {
+            await JSRuntime.InvokeVoidAsync("SDD.updateOptions", _instanceId, BuildOptionsPayload(), SelectedOption?.Id ?? 0, SelectedOption?.Value);
+        }
+
+        if (selectionChanged)
+        {
+            StateHasChanged();
+        }
+    }
+
+    public class SingleSelectDropDownWithSearchOption
+    {
+        public SingleSelectDropDownWithSearchOption(string value, int? id = null)
+        {
+            // 0 doubles as "no id supplied". Selection matching treats 0 as "fall back to
+            // Value / exact list position" instead of comparing ids directly (see
+            // OnOptionChosen below) — so this stays correct even for callers that never pass
+            // an id. Note: if any of your real data legitimately uses Id == 0, that option will
+            // also be matched by value/position rather than by id — harmless as long as its
+            // Value text is unique among the options in the same list.
+            Id = id ?? 0;
+            Value = value;
+        }
+
+        public int Id { get; set; }
+        public string Value { get; set; } = string.Empty;
+    }
+
+    private string GetInputDisplayValue() => SelectedOption?.Value ?? "";
+
+    private IEnumerable<object> BuildOptionsPayload()
+        => (Options ?? Enumerable.Empty<SingleSelectDropDownWithSearchOption>()).Select(o => new { id = o.Id, value = o.Value });
+
+    // ---- The two JS -> .NET entry points. Everything else (typing, arrow keys, highlighting,
+    // open/close, click-outside) is handled entirely in JS and never reaches here. ----
+
+    [JSInvokable]
+    public async Task OnOptionChosen(int optionId, string optionValue, int optionIndex)
+    {
+        if (_isDisposed || IsDisabled) return;
+
+        // Real id (non-zero): match by id — exact and collision-proof.
+        // 0 ("no id supplied"): fall back to the exact position JS reported in the
+        // (unfiltered) Options list. This stays unambiguous even if two id-less options
+        // share identical Value text — unlike matching on Value alone.
+        var option = optionId != 0
+            ? Options?.FirstOrDefault(o => o.Id == optionId)
+            : Options?.ElementAtOrDefault(optionIndex);
+
+        if (option == null) return;
+
+        await SelectOption(option);
+    }
+
+    [JSInvokable]
+    public async Task OnCleared()
+    {
+        if (_isDisposed || IsDisabled) return;
+
+        await ClearSelection();
+    }
+
+    private async Task SelectOption(SingleSelectDropDownWithSearchOption option)
+    {
+        if (_isDisposed) return;
+
+        SelectedOption = option;
+        _previousSelectedOption = option;
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        await SelectedOptionChanged.InvokeAsync(option);
+        OnChange?.Invoke(option);
+        await AsyncCallBack.InvokeAsync(option);
+        CallBack?.Invoke();
+
+        StateHasChanged();
+    }
+
+    private async Task ClearSelection()
+    {
+        if (_isDisposed) return;
+
+        SelectedOption = null;
+        _previousSelectedOption = null;
+
+        await SelectedOptionChanged.InvokeAsync(null);
+        OnChange?.Invoke(null);
+        await AsyncCallBack.InvokeAsync(null);
+        CallBack?.Invoke();
+
+        StateHasChanged();
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "outline-1 -outline-offset-1";
+
+        if (IsDisabled)
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (Highlight)
+            return $"{baseClasses} outline-amber-400 border-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600";
+
+        if (HighlightWhenSelected && SelectedOption != null)
+            return $"{baseClasses} bg-amber-400 outline-amber-400 border-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600";
+
+        if (isInvalid)
+            return $"{baseClasses} bg-white outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-600";
+
+        return $"{baseClasses} bg-white outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+    }
+}
+
+<script>
+    // SDD = Searchable Dropdown. One module, one instance per component (keyed by the
+    // guaranteed-unique instance id passed from .NET). Everything here runs purely client-side —
+    // filtering, highlighting, keyboard nav, open/close, click-outside, and the body-portal
+    // positioning. The ONLY time this module talks back to .NET is in choose() and
+    // clearSelection(), i.e. once per actual selection — not once per keystroke.
+    //
+    // Selection matching: an option's id is 0 when the caller supplied none (see the C# option
+    // constructor). When both the option and the current selection have a non-zero id, we
+    // compare by id — exact, collision-proof. Otherwise we fall back to comparing `value` for
+    // display/highlight purposes — and, when an actual choice is made, we also report the
+    // option's exact position in the full (unfiltered) options list, so .NET can resolve id-less
+    // options unambiguously even if two of them share identical text.
+    window.SDD = window.SDD || (function() {
+        const instances = {};
+        const NO_ID = 0;
+
+        const svgClear = '<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd" /></svg>';
+        const svgCheck = '<svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true" data-slot="icon"><path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd"></path></svg>';
+
+        function esc(s) {
+            return (s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        }
+
+        function filtered(inst) {
+            const term = inst.searchText.trim().toLowerCase();
+            return term ? inst.options.filter(o => o.value.toLowerCase().includes(term)) : inst.options;
+        }
+
+        // True when option `o` is the currently-selected one. Id comparison wins whenever both
+        // sides have a real (non-zero) id; otherwise falls back to comparing display text.
+        function isSelected(inst, o) {
+            if (o.id !== NO_ID && inst.selectedId !== NO_ID) {
+                return o.id === inst.selectedId;
+            }
+            return o.value === inst.selectedValue;
+        }
+
+        function render(inst) {
+            const items = filtered(inst);
+            let html = '';
+
+            if (inst.allowReset && (inst.selectedId !== NO_ID || inst.selectedValue) && !inst.searchText) {
+                html += '<li data-role="clear" class="relative cursor-default py-2 pr-4 pl-8 text-red-600 select-none cursor-pointer hover:bg-gray-300 border-b border-gray-200">'
+                    + '<span class="block truncate font-normal italic">Clear</span>'
+                    + '<span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-red-600">' + svgClear + '</span>'
+                    + '</li>';
+            }
+
+            if (items.length) {
+                items.forEach((o, i) => {
+                    const hl = i === inst.highlighted ? 'bg-accent-100' : '';
+                    const sel = isSelected(inst, o);
+                    html += '<li data-role="option" data-index="' + i + '" class="relative cursor-default py-2 pr-4 pl-8 text-gray-900 select-none cursor-pointer hover:bg-gray-300 ' + hl + '">'
+                        + '<span class="block truncate font-normal">' + esc(o.value) + '</span>'
+                        + (sel ? '<span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">' + svgCheck + '</span>' : '')
+                        + '</li>';
+                });
+            } else if (inst.searchText) {
+                html += '<li class="relative cursor-default py-2 px-4 text-gray-500 select-none italic">No results found</li>';
+            }
+
+            inst.listEl.innerHTML = html;
+        }
+
+        function updatePosition(inst) {
+            if (!document.body.contains(inst.wrapperEl)) return;
+            const rect = inst.wrapperEl.getBoundingClientRect();
+            Object.assign(inst.listEl.style, {
+                position: 'fixed',
+                top: (rect.bottom + 4) + 'px',
+                left: rect.left + 'px',
+                minWidth: rect.width + 'px',
+                width: 'max-content',
+                zIndex: '9999',
+                margin: '0',
+                display: 'block'
+            });
+        }
+
+        // function attachToBody(inst) {
+        //     if (!inst.listEl._originalParent) inst.listEl._originalParent = inst.listEl.parentElement;
+        //     if (inst.listEl.parentElement !== document.body) document.body.appendChild(inst.listEl);
+
+        //     requestAnimationFrame(() => requestAnimationFrame(() => updatePosition(inst)));
+
+        //     inst._posHandler = () => updatePosition(inst);
+        //     window.addEventListener('scroll', inst._posHandler, true);
+        //     window.addEventListener('resize', inst._posHandler, true);
+        // }
+
+        function attachToBody(inst) {
+            if (!inst.listEl._originalParent) inst.listEl._originalParent = inst.listEl.parentElement;
+            if (inst.listEl.parentElement !== document.body) document.body.appendChild(inst.listEl);
+
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+                updatePosition(inst);
+                scrollHighlighted(inst);
+            }));
+
+            inst._posHandler = () => updatePosition(inst);
+            window.addEventListener('scroll', inst._posHandler, true);
+            window.addEventListener('resize', inst._posHandler, true);
+        }
+
+        function detachFromBody(inst) {
+            if (inst._posHandler) {
+                window.removeEventListener('scroll', inst._posHandler, true);
+                window.removeEventListener('resize', inst._posHandler, true);
+                inst._posHandler = null;
+            }
+
+            const parent = inst.listEl._originalParent;
+            if (parent && document.body.contains(parent)) parent.appendChild(inst.listEl);
+
+            Object.assign(inst.listEl.style, { position: '', top: '', left: '', minWidth: '', width: '', zIndex: '', margin: '', display: 'none' });
+        }
+
+        function open(id) {
+            const inst = instances[id];
+            if (!inst || inst.isOpen || inst.inputEl.disabled) return;
+
+            inst.isOpen = true;
+            inst.searchText = '';
+            inst.inputEl.value = '';
+
+            const items = filtered(inst);
+            inst.highlighted = inst.selectedId !== NO_ID
+                ? items.findIndex(o => o.id === inst.selectedId)
+                : items.findIndex(o => o.value === inst.selectedValue);
+            if (inst.highlighted < 0) inst.highlighted = 0;
+
+            render(inst);
+            attachToBody(inst);
+        }
+
+        function close(id, revert) {
+            const inst = instances[id];
+            if (!inst || !inst.isOpen) return;
+
+            inst.isOpen = false;
+            inst.searchText = '';
+            inst.highlighted = -1;
+            detachFromBody(inst);
+
+            if (revert) inst.inputEl.value = inst.selectedValue ?? '';
+        }
+
+        function toggle(id) {
+            const inst = instances[id];
+            if (!inst) return;
+            inst.isOpen ? close(id, true) : open(id);
+        }
+
+        function forceClose(id) {
+            close(id, true);
+        }
+
+        // Takes the actual option object (not just an id) so it works identically whether the
+        // option has a real id or is 0. Reports the option's true index in the full,
+        // unfiltered options list — that's what lets .NET resolve id-less options unambiguously.
+        function choose(id, option) {
+            const inst = instances[id];
+            if (!inst || !option) return;
+
+            inst.selectedId = option.id;
+            inst.selectedValue = option.value;
+            inst.inputEl.value = option.value;
+            close(id, false);
+
+            const fullIndex = inst.options.indexOf(option);
+            inst.dotNetRef.invokeMethodAsync('OnOptionChosen', option.id, option.value, fullIndex);
+        }
+
+        function clearSelection(id) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.selectedId = NO_ID;
+            inst.selectedValue = '';
+            inst.inputEl.value = '';
+            close(id, false);
+
+            inst.dotNetRef.invokeMethodAsync('OnCleared');
+        }
+
+        function handleInput(id, value) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            if (!inst.isOpen) open(id);
+            inst.searchText = value;
+            inst.highlighted = 0;
+            render(inst);
+        }
+
+        function scrollHighlighted(inst) {
+            const el = inst.listEl.querySelector('[data-index="' + inst.highlighted + '"]');
+            if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        }
+
+        function handleKeydown(id, e) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            const items = inst.isOpen ? filtered(inst) : [];
+
+            switch (e.key) {
+                case 'Escape':
+                    close(id, true);
+                    break;
+
+                case 'Enter':
+                    e.preventDefault();
+                    if (inst.isOpen && inst.highlighted >= 0 && inst.highlighted < items.length) {
+                        choose(id, items[inst.highlighted]);
+                    } else if (!inst.isOpen) {
+                        open(id);
+                    }
+                    break;
+
+                case 'ArrowDown':
+                    e.preventDefault();
+                    if (!inst.isOpen) {
+                        open(id);
+                    } else if (items.length) {
+                        inst.highlighted = Math.min(inst.highlighted + 1, items.length - 1);
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'ArrowUp':
+                    e.preventDefault();
+                    if (inst.isOpen && items.length) {
+                        inst.highlighted = Math.max(inst.highlighted - 1, 0);
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'Home':
+                    if (inst.isOpen && items.length) {
+                        inst.highlighted = 0;
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'End':
+                    if (inst.isOpen && items.length) {
+                        inst.highlighted = items.length - 1;
+                        render(inst);
+                        scrollHighlighted(inst);
+                    }
+                    break;
+
+                case 'Tab':
+                    close(id, true);
+                    break;
+            }
+        }
+
+        function onListClick(id, e) {
+            const li = e.target.closest('li[data-role]');
+            if (!li) return;
+
+            if (li.dataset.role === 'clear') {
+                clearSelection(id);
+            } else if (li.dataset.role === 'option') {
+                const inst = instances[id];
+                if (!inst) return;
+                const items = filtered(inst);
+                const option = items[parseInt(li.dataset.index, 10)];
+                choose(id, option);
+            }
+        }
+
+        function onDocumentClick(id, e) {
+            const inst = instances[id];
+            if (!inst || !inst.isOpen) return;
+            if (inst.wrapperEl.contains(e.target) || inst.listEl.contains(e.target)) return;
+            close(id, true);
+        }
+
+        function init(id, inputEl, listEl, wrapperEl, options, allowReset, selectedId, selectedValue, dotNetRef) {
+            dispose(id); // re-init safe
+
+            const inst = {
+                inputEl, listEl, wrapperEl, dotNetRef,
+                options, allowReset,
+                selectedId: selectedId ?? NO_ID,
+                selectedValue: selectedValue ?? '',
+                isOpen: false,
+                searchText: '',
+                highlighted: -1
+            };
+            instances[id] = inst;
+
+            inst._inputHandler = e => handleInput(id, e.target.value);
+            inst._keydownHandler = e => handleKeydown(id, e);
+            inst._focusHandler = () => { if (!inst.isOpen) open(id); };
+            inst._listMouseDownHandler = e => e.preventDefault(); // keep focus on input while clicking the list
+            inst._listClickHandler = e => onListClick(id, e);
+            inst._docClickHandler = e => onDocumentClick(id, e);
+
+            inputEl.addEventListener('input', inst._inputHandler);
+            inputEl.addEventListener('keydown', inst._keydownHandler);
+            inputEl.addEventListener('focus', inst._focusHandler);
+            listEl.addEventListener('mousedown', inst._listMouseDownHandler);
+            listEl.addEventListener('click', inst._listClickHandler);
+            document.addEventListener('click', inst._docClickHandler, true);
+        }
+
+        function updateOptions(id, options, selectedId, selectedValue) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.options = options;
+            inst.selectedId = selectedId ?? NO_ID;
+            inst.selectedValue = selectedValue ?? '';
+
+            if (!inst.isOpen) inst.inputEl.value = inst.selectedValue;
+            else render(inst);
+        }
+
+        function dispose(id) {
+            const inst = instances[id];
+            if (!inst) return;
+
+            inst.inputEl.removeEventListener('input', inst._inputHandler);
+            inst.inputEl.removeEventListener('keydown', inst._keydownHandler);
+            inst.inputEl.removeEventListener('focus', inst._focusHandler);
+            inst.listEl.removeEventListener('mousedown', inst._listMouseDownHandler);
+            inst.listEl.removeEventListener('click', inst._listClickHandler);
+            document.removeEventListener('click', inst._docClickHandler, true);
+
+            if (inst.isOpen) detachFromBody(inst);
+
+            delete instances[id];
+        }
+
+        return { init, open, close, toggle, forceClose, updateOptions, dispose };
+    })();
+</script>

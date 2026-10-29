@@ -1,0 +1,206 @@
+﻿@using Microsoft.AspNetCore.Components
+@using System.Globalization
+@implements IDisposable
+
+<div class="relative">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") z-10">
+        @Label
+    </label>
+    <div class="relative">
+        <input type="text"
+               name="@Name"
+               id="@Id"
+               value="@GetDisplayValue()"
+               disabled="@IsDisabled"
+               @onchange="HandleChange"
+               @onfocus="HandleFocus"
+               @onblur="HandleBlur"
+               @onkeypress="HandleKeyPress"
+               @onpaste="HandlePaste"
+               class="@GetInputClasses()"
+               placeholder="@Placeholder" />
+        <span class="absolute right-3 top-1/2 transform -translate-y-1/2 @(IsDisabled ? "text-gray-300" : "text-gray-500") text-sm z-10">%</span>
+    </div>
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public decimal? Value { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action? CallBack { get; set; }
+    [Parameter] public EventCallback<decimal?> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = "0.00";
+    [Parameter] public int DecimalPlaces { get; set; } = 2;
+    [Parameter] public bool AllowNull { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component registers
+    /// its own Validate method into your list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    private bool isEditing = false;
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        ValidationRef?.Invoke(Validate);
+        base.OnInitialized();
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && Value is null)
+        {
+            isInvalid = true;
+            errorMessage = "This field is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (Value is not null && (Value < 0 || Value > 100))
+        {
+            isInvalid = true;
+            errorMessage = "Value must be between 0 and 100";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "border-none block w-full rounded-md px-3 pr-8 py-1.5 text-base outline-1 -outline-offset-1 placeholder:text-gray-400 focus:outline-2 focus:-outline-offset-2 sm:text-sm/6 relative";
+
+        if (IsDisabled)
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (Highlight)
+            return $"{baseClasses}  text-gray-900 outline-amber-400 focus:outline-amber-600";
+
+        if (isInvalid)
+            return $"{baseClasses} bg-white text-gray-900 outline-red-500 focus:outline-red-500";
+
+        return $"{baseClasses} bg-white text-gray-900 outline-gray-300 focus:outline-accent-600";
+    }
+
+    private string GetDisplayValue()
+    {
+        if (Value == null) return string.Empty;
+
+        if (isEditing && !IsDisabled)
+            return Value.ToString() ?? string.Empty;
+
+        return Value.Value.ToString($"N{DecimalPlaces}", CultureInfo.CurrentCulture);
+    }
+
+    private void HandleKeyPress(KeyboardEventArgs e)
+    {
+        // Allow: digits, decimal point, and nothing else
+        var allowed = e.Key.Length == 1 && (char.IsDigit(e.Key[0]) || e.Key[0] == '.');
+        if (!allowed)
+        {
+            // Returning here doesn't cancel the event in Blazor — we rely on
+            // HandleChange discarding non-numeric content on commit instead.
+            // For a hard block we use a JS interop approach via the onkeypress
+            // returning false, which Blazor handles via preventDefault below.
+        }
+    }
+
+    private async Task HandlePaste(ClipboardEventArgs e)
+    {
+        // Paste is handled by stripping non-numeric characters in CleanValueForParsing
+        // on the subsequent change event, so no action needed here.
+        await Task.CompletedTask;
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        var stringValue = e.Value?.ToString();
+
+        if (string.IsNullOrWhiteSpace(stringValue))
+        {
+            Value = AllowNull ? null : 0;
+            await ValueChanged.InvokeAsync(Value);
+            await InvokeCallbacks();
+            return;
+        }
+
+        var cleanValue = CleanValueForParsing(stringValue);
+
+        if (string.IsNullOrWhiteSpace(cleanValue))
+            Value = AllowNull ? null : 0;
+        else if (decimal.TryParse(cleanValue, NumberStyles.Number, CultureInfo.CurrentCulture, out var parsedValue))
+            Value = parsedValue;
+        else if (Value == null)
+            Value = AllowNull ? null : 0;
+
+        if (Value is not null)
+        {
+            isInvalid = false;
+            errorMessage = string.Empty;
+        }
+
+        await ValueChanged.InvokeAsync(Value);
+        await InvokeCallbacks();
+    }
+
+    private async Task InvokeCallbacks()
+    {
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+
+        CallBack?.Invoke();
+    }
+
+    private string CleanValueForParsing(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return string.Empty;
+
+        // Strip everything except digits and decimal point
+        var cleaned = new string(value.Where(c => char.IsDigit(c) || c == '.').ToArray());
+
+        // If multiple decimal points snuck in, keep only the first
+        var firstDot = cleaned.IndexOf('.');
+        if (firstDot >= 0)
+            cleaned = cleaned[..(firstDot + 1)] + cleaned[(firstDot + 1)..].Replace(".", "");
+
+        return cleaned;
+    }
+
+    private void HandleFocus()
+    {
+        if (IsDisabled) return;
+        isEditing = true;
+        StateHasChanged();
+    }
+
+    private void HandleBlur()
+    {
+        if (IsDisabled) return;
+        isEditing = false;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+    }
+}

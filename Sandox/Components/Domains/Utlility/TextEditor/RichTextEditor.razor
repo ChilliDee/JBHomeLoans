@@ -1,0 +1,747 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* ═══════════════════════════════════════════════════════════════════════════
+   RichTextEditor.razor — single-file, zero external dependencies.
+   Usage: <RichTextEditor @bind-Value="myHtmlString" />
+   ═══════════════════════════════════════════════════════════════════════════ *@
+
+<style>
+    :root {
+        --rte-bg: #ffffff;
+        --rte-toolbar-bg: #f3f4f6;
+        --rte-border: #d1d5db;
+        --rte-btn-hover: #e5e7eb;
+        --rte-btn-active: #dbeafe;
+        --rte-text: #111827;
+        --rte-placeholder: #9ca3af;
+        --rte-accent: #2563eb;
+        --rte-radius: 6px;
+        --rte-font: 'Segoe UI', system-ui, sans-serif;
+        --rte-sep: #d1d5db;
+        --rte-dialog-bg: #ffffff;
+        --rte-dialog-input-bg: #f9fafb;
+        --rte-focus-ring: rgba(37,99,235,0.25);
+    }
+
+    .rte-shell {
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--rte-border);
+        border-radius: var(--rte-radius);
+        background: var(--rte-bg);
+        font-family: var(--rte-font);
+        color: var(--rte-text);
+        overflow: hidden;
+    }
+
+        .rte-shell.rte-disabled {
+            opacity: .5;
+            pointer-events: none;
+        }
+
+    .rte-scroll {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .rte-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px;
+        padding: 6px 8px;
+        background: var(--rte-toolbar-bg);
+        border-bottom: 1px solid var(--rte-border);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .rte-sep {
+        width: 1px;
+        height: 20px;
+        background: var(--rte-sep);
+        margin: 0 4px;
+        flex-shrink: 0;
+    }
+
+    .rte-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border: none;
+        border-radius: 4px;
+        background: transparent;
+        color: var(--rte-text);
+        cursor: pointer;
+        padding: 0;
+        transition: background .12s, color .12s;
+        flex-shrink: 0;
+    }
+
+        .rte-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: currentColor;
+            pointer-events: none;
+        }
+
+        .rte-btn:hover {
+            background: var(--rte-btn-hover);
+            color: #111827;
+        }
+
+        .rte-btn.rte-active {
+            background: var(--rte-btn-active);
+            color: var(--rte-accent);
+        }
+
+    .rte-select {
+        height: 30px;
+        background: var(--rte-dialog-input-bg);
+        border: 1px solid var(--rte-border);
+        border-radius: 4px;
+        color: var(--rte-text);
+        padding: 0 6px;
+        font-size: 13px;
+        cursor: pointer;
+        outline: none;
+        appearance: auto;
+    }
+
+        .rte-select:focus {
+            border-color: var(--rte-accent);
+            box-shadow: 0 0 0 2px var(--rte-focus-ring);
+        }
+
+    .rte-font-family {
+        width: 130px;
+    }
+
+    .rte-font-size {
+        width: 68px;
+    }
+
+    .rte-color-btn {
+        position: relative;
+        flex-direction: column;
+        width: 30px;
+        height: 30px;
+        gap: 1px;
+    }
+
+    .rte-color-bar {
+        width: 14px;
+        height: 3px;
+        border-radius: 1px;
+        pointer-events: none;
+    }
+
+    .rte-color-input {
+        position: absolute;
+        opacity: 0;
+        width: 100%;
+        height: 100%;
+        top: 0;
+        left: 0;
+        cursor: pointer;
+        border: none;
+        padding: 0;
+    }
+
+    .rte-body {
+        padding: 14px 16px;
+        outline: none;
+        line-height: 1.65;
+        font-size: 14px;
+        color: var(--rte-text);
+        background: var(--rte-bg);
+        overflow-y: auto;
+        word-break: break-word;
+        flex: 1;
+        min-height: 0;
+    }
+
+        .rte-body:empty::before {
+            content: attr(data-placeholder);
+            color: var(--rte-placeholder);
+            pointer-events: none;
+        }
+
+        .rte-body a {
+            color: var(--rte-accent);
+        }
+
+        .rte-body table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 8px 0;
+        }
+
+        .rte-body td,
+        .rte-body th {
+            border: 1px solid var(--rte-border);
+            padding: 4px 8px;
+        }
+
+        .rte-body th {
+            background: var(--rte-toolbar-bg);
+            font-weight: 600;
+        }
+
+        .rte-body ul,
+        .rte-body ol {
+            padding-left: 1.5em;
+            margin: 4px 0;
+        }
+
+        .rte-body img {
+            max-width: 100%;
+            border-radius: 4px;
+        }
+
+        .rte-body ul {
+            list-style-type: disc;
+        }
+
+            .rte-body ul ul {
+                list-style-type: circle;
+            }
+
+                .rte-body ul ul ul {
+                    list-style-type: square;
+                }
+
+        .rte-body ol {
+            list-style-type: decimal;
+        }
+
+        .rte-body li {
+            display: list-item;
+        }
+
+    .rte-dialog-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        backdrop-filter: blur(2px);
+    }
+
+    .rte-dialog {
+        background: var(--rte-dialog-bg);
+        border: 1px solid var(--rte-border);
+        border-radius: 8px;
+        padding: 20px 24px;
+        min-width: 320px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        box-shadow: 0 8px 32px rgba(0,0,0,.15);
+    }
+
+    .rte-dialog-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: #111827;
+        margin-bottom: 2px;
+    }
+
+    .rte-dialog-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+        .rte-dialog-row label {
+            width: 70px;
+            font-size: 13px;
+            color: var(--rte-text);
+        }
+
+    .rte-dialog-input {
+        width: 100%;
+        background: var(--rte-dialog-input-bg);
+        border: 1px solid var(--rte-border);
+        border-radius: 4px;
+        color: var(--rte-text);
+        padding: 7px 10px;
+        font-size: 13px;
+        outline: none;
+        box-sizing: border-box;
+        transition: border-color .12s, box-shadow .12s;
+    }
+
+    .rte-dialog-input-sm {
+        width: 70px;
+    }
+
+    .rte-dialog-input:focus {
+        border-color: var(--rte-accent);
+        box-shadow: 0 0 0 3px var(--rte-focus-ring);
+    }
+
+    .rte-dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 4px;
+    }
+
+    .rte-dialog-btn {
+        padding: 6px 16px;
+        border-radius: 4px;
+        border: none;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background .12s;
+    }
+
+    .rte-dialog-btn-cancel {
+        background: var(--rte-btn-hover);
+        color: var(--rte-text);
+    }
+
+        .rte-dialog-btn-cancel:hover {
+            background: #d1d5db;
+        }
+
+    .rte-dialog-btn-ok {
+        background: var(--rte-accent);
+        color: #fff;
+        font-weight: 600;
+    }
+
+        .rte-dialog-btn-ok:hover {
+            background: #1d4ed8;
+        }
+</style>
+
+<div class="@_shellCss @MainContainerExternalClasses" style="@_shellStyle">
+    <div class="rte-scroll">
+
+        <div class="rte-toolbar">
+
+            <button class="rte-btn" title="Undo" @onclick="OnUndo">
+                <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05 1-6.9 2.6L2 7v9h9l-3.62-3.62C8.72 11.14 10.51 10.5 12.5 10.5c3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z" /></svg>
+            </button>
+            <button class="rte-btn" title="Redo" @onclick="OnRedo">
+                <svg viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 9 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z" /></svg>
+            </button>
+
+            <div class="rte-sep"></div>
+
+            <select class="rte-select rte-font-family" title="Font Family" @onchange="OnFontFamilyChange">
+                @foreach (var f in _fontFamilies)
+                {
+                    <option value="@f" style="font-family:@f">@f</option>
+                }
+            </select>
+
+            <select class="rte-select rte-font-size" title="Font Size" @onchange="OnFontSizeChange">
+                @foreach (var s in _fontSizes)
+                {
+                    <option value="@s.Value">@s.Label</option>
+                }
+            </select>
+
+            <div class="rte-sep"></div>
+
+            <button class="@_boldCss" title="Bold (Ctrl+B)" @onclick="OnBold">
+                <svg viewBox="0 0 24 24"><path d="M15.6 10.79c.97-.67 1.65-1.77 1.65-2.79 0-2.26-1.75-4-4-4H7v14h7.04c2.09 0 3.71-1.7 3.71-3.79 0-1.52-.86-2.82-2.15-3.42zM10 6.5h3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-3v-3zm3.5 9H10v-3h3.5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5z" /></svg>
+            </button>
+            <button class="@_italicCss" title="Italic (Ctrl+I)" @onclick="OnItalic">
+                <svg viewBox="0 0 24 24"><path d="M10 4v3h2.21l-3.42 8H6v3h8v-3h-2.21l3.42-8H18V4z" /></svg>
+            </button>
+            <button class="@_underlineCss" title="Underline (Ctrl+U)" @onclick="OnUnderline">
+                <svg viewBox="0 0 24 24"><path d="M12 17c3.31 0 6-2.69 6-6V3h-2.5v8c0 1.93-1.57 3.5-3.5 3.5S8.5 12.93 8.5 11V3H6v8c0 3.31 2.69 6 6 6zm-7 2v2h14v-2H5z" /></svg>
+            </button>
+
+            <div class="rte-sep"></div>
+
+            <label class="rte-btn rte-color-btn" title="Text Colour">
+                <svg viewBox="0 0 24 24"><path d="M11.5 2L6 16h2.5l1.12-3h5.75L16.5 16H19L13.5 2h-2zm-1.07 9L12 5.48 13.57 11h-3.14z" /></svg>
+                <div class="rte-color-bar" style="background:@_textColor"></div>
+                <input type="color" class="rte-color-input" value="@_textColor" @onchange="OnTextColorChange" />
+            </label>
+
+            @* <label class="rte-btn rte-color-btn" title="Highlight Colour">
+                <svg viewBox="0 0 24 24"><path d="M6 14l3 3 8.5-8.5-3-3L6 14zm14 4.83L18.83 17l-1.17 1.17L16.5 17l-1.33 1.17L14 17l-1.17 1.17L11.67 17l-1.17 1.17L9.33 17 8 18.33 9.17 19.5 8 20.67 9.33 22l1.17-1.17L11.67 22l1.16-1.17L14 22l1.17-1.17L16.5 22l1.33-1.17L19 22l1.33-1.17L21.67 22 23 20.67l-1.17-1.17L23 18.33 21.67 17 20 18.83z" /></svg>
+                <div class="rte-color-bar" style="background:@_highlightColor"></div>
+                <input type="color" class="rte-color-input" value="@_highlightColor" @onchange="OnHighlightColorChange" />
+            </label> *@
+
+            <div class="rte-sep"></div>
+
+            <button class="@_orderedListCss" title="Ordered List" @onclick="OnOrderedList">
+                <svg viewBox="0 0 24 24"><path d="M2 17h2v.5H3v1h1v.5H2v1h3v-4H2v1zm1-9h1V4H2v1h1v3zm-1 3h1.8L2 13.1v.9h3v-1H3.2L5 10.9V10H2v1zm5-6v2h14V5H7zm0 14h14v-2H7v2zm0-6h14v-2H7v2z" /></svg>
+            </button>
+            <button class="@_unorderedListCss" title="Unordered List" @onclick="OnUnorderedList">
+                <svg viewBox="0 0 24 24"><path d="M4 10.5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5 1.5-.67 1.5-1.5-.67-1.5-1.5-1.5zm0-6c-.83 0-1.5.67-1.5 1.5S3.17 7.5 4 7.5 5.5 6.83 5.5 6 4.83 4.5 4 4.5zm0 12c-.83 0-1.5.68-1.5 1.5s.68 1.5 1.5 1.5 1.5-.68 1.5-1.5-.67-1.5-1.5-1.5zM7 19h14v-2H7v2zm0-6h14v-2H7v2zm0-8v2h14V5H7z" /></svg>
+            </button>
+
+            @* <div class="rte-sep"></div>
+
+            <button class="rte-btn" title="Insert Link" @onclick="OpenLinkDialog">
+                <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z" /></svg>
+            </button>
+            <button class="rte-btn" title="Insert Table" @onclick="OpenTableDialog">
+                <svg viewBox="0 0 24 24"><path d="M20 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h15c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 2v3H5V5h15zm-9 5h-6v3h6v-3zm0 5h-6v3h6v-3zm8 3h-6v-3h6v3zm0-5h-6v-3h6v3z" /></svg>
+            </button>
+            <button class="rte-btn" title="Insert Image" @onclick="OpenImageDialog">
+                <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z" /></svg>
+            </button> *@
+
+        </div>
+
+        @* ── Link dialog ── *@
+        @if (_showLinkDialog)
+        {
+            <div class="rte-dialog-overlay" @onclick="CloseLinkDialog">
+                <div class="rte-dialog" @onclick:stopPropagation>
+                    <div class="rte-dialog-title">Insert Link</div>
+                    <input class="rte-dialog-input" placeholder="Display text" @bind="_linkText" />
+                    <input class="rte-dialog-input" placeholder="URL (https://...)" @bind="_linkUrl" />
+                    <div class="rte-dialog-actions">
+                        <button class="rte-dialog-btn rte-dialog-btn-cancel" @onclick="CloseLinkDialog">Cancel</button>
+                        <button class="rte-dialog-btn rte-dialog-btn-ok" @onclick="InsertLinkAsync">Insert</button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ── Table dialog ── *@
+        @if (_showTableDialog)
+        {
+            <div class="rte-dialog-overlay" @onclick="CloseTableDialog">
+                <div class="rte-dialog" @onclick:stopPropagation>
+                    <div class="rte-dialog-title">Insert Table</div>
+                    <div class="rte-dialog-row">
+                        <label>Rows</label>
+                        <input class="rte-dialog-input rte-dialog-input-sm" type="number" min="1" max="20" @bind="_tableRows" />
+                    </div>
+                    <div class="rte-dialog-row">
+                        <label>Columns</label>
+                        <input class="rte-dialog-input rte-dialog-input-sm" type="number" min="1" max="10" @bind="_tableCols" />
+                    </div>
+                    <div class="rte-dialog-actions">
+                        <button class="rte-dialog-btn rte-dialog-btn-cancel" @onclick="CloseTableDialog">Cancel</button>
+                        <button class="rte-dialog-btn rte-dialog-btn-ok" @onclick="InsertTableAsync">Insert</button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ── Image dialog ── *@
+        @if (_showImageDialog)
+        {
+            <div class="rte-dialog-overlay" @onclick="CloseImageDialog">
+                <div class="rte-dialog" @onclick:stopPropagation>
+                    <div class="rte-dialog-title">Insert Image</div>
+                    <input class="rte-dialog-input" placeholder="Image URL (https://...)" @bind="_imageUrl" />
+                    <input class="rte-dialog-input" placeholder="Alt text (optional)" @bind="_imageAlt" />
+                    <div class="rte-dialog-actions">
+                        <button class="rte-dialog-btn rte-dialog-btn-cancel" @onclick="CloseImageDialog">Cancel</button>
+                        <button class="rte-dialog-btn rte-dialog-btn-ok" @onclick="InsertImageAsync">Insert</button>
+                    </div>
+                </div>
+            </div>
+        }
+
+        @* ── Editable body ── *@
+        <div id="@_editorId" class="rte-body @BodyExternalClasses" contenteditable="@_contentEditable" spellcheck="true"></div>
+
+    </div>@* end rte-scroll *@
+</div>
+
+@code {
+
+    // ── Parameters ────────────────────────────────────────────────────────────
+
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public EventCallback<string> OnChange { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Start typing…";
+    [Parameter] public int MinHeight { get; set; } = 220;
+    [Parameter] public int? MaxHeight { get; set; }
+    [Parameter] public int? MaxWidth { get; set; }
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? MainContainerExternalClasses { get; set; }
+    [Parameter] public string? BodyExternalClasses { get; set; }
+
+    // ── CSS helpers ───────────────────────────────────────────────────────────
+
+    private string _shellCss => Disabled ? "rte-shell rte-disabled" : "rte-shell";
+    private string _contentEditable => Disabled ? "false" : "true";
+    private string _boldCss => _bold ? "rte-btn rte-active" : "rte-btn";
+    private string _italicCss => _italic ? "rte-btn rte-active" : "rte-btn";
+    private string _underlineCss => _underline ? "rte-btn rte-active" : "rte-btn";
+    private string _orderedListCss => _orderedList ? "rte-btn rte-active" : "rte-btn";
+    private string _unorderedListCss => _unorderedList ? "rte-btn rte-active" : "rte-btn";
+
+    private string _shellStyle
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            if (MaxHeight.HasValue) sb.Append($"max-height:{MaxHeight}px;");
+            if (MaxWidth.HasValue) sb.Append($"max-width:{MaxWidth}px;");
+            return sb.ToString();
+        }
+    }
+
+    // ── Private state ─────────────────────────────────────────────────────────
+
+    private readonly string _editorId = $"rte-{Guid.NewGuid():N}";
+    private string _lastKnownHtml = string.Empty;
+    private DotNetObjectReference<RichTextEditor>? _dotNetRef;
+    private bool _initialised;
+
+    private bool _bold, _italic, _underline, _orderedList, _unorderedList;
+    private string _textColor = "#111827";
+    private string _highlightColor = "#fde68a";
+
+    private bool _showLinkDialog;
+    private string _linkText = string.Empty;
+    private string _linkUrl = string.Empty;
+
+    private bool _showTableDialog;
+    private int _tableRows = 3;
+    private int _tableCols = 3;
+
+    private bool _showImageDialog;
+    private string _imageUrl = string.Empty;
+    private string _imageAlt = string.Empty;
+
+    private static readonly string[] _fontFamilies =
+        ["Arial", "Georgia", "Helvetica", "Courier New", "Times New Roman", "Trebuchet MS", "Verdana"];
+
+    private static readonly (string Label, string Value)[] _fontSizes =
+        [("8pt", "1"), ("10pt", "2"), ("12pt", "3"), ("14pt", "4"), ("18pt", "5"), ("24pt", "6"), ("36pt", "7")];
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    //
+    // The DotNetObjectReference cannot be JSON-serialised — passing it through
+    // BuildCall/eval would turn it into a plain object with no invokeMethodAsync.
+    // Solution: store it on window.__rte[id].dn via InvokeVoidAsync (which
+    // handles live JS references correctly), then reference it by id in all
+    // subsequent eval calls.
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _dotNetRef   = DotNetObjectReference.Create(this);
+        _initialised = true;
+
+        // Step 1 — register the DotNetObjectReference via a named function call
+        // so Blazor's interop layer passes it as a live JS reference, not JSON.
+        await JS.InvokeVoidAsync("eval", @"
+            window.__rte = window.__rte || {};
+            window.__rteRegister = function(id, dotNet) {
+                window.__rte[id] = window.__rte[id] || {};
+                window.__rte[id].dn = dotNet;
+            };");
+
+        await JS.InvokeVoidAsync("window.__rteRegister", _editorId, _dotNetRef);
+
+        // Step 2 — initialise the editor element (no dotNet arg needed here)
+        await JS.InvokeVoidAsync("eval", BuildCall(@"
+            var r = window.__rte[_a0];
+            var el = document.getElementById(_a0);
+            if (!r || !el) return;
+            r.el = el;
+            el.style.minHeight = _a1 + 'px';
+            el.setAttribute('data-placeholder', _a2);
+            el.innerHTML = _a3 || '';
+            function dbc(fn, ms) { var t; return function () { clearTimeout(t); t = setTimeout(fn, ms); }; }
+            function sync() {
+                r.dn.invokeMethodAsync('OnSelectionChanged',
+                    document.queryCommandState('bold'),
+                    document.queryCommandState('italic'),
+                    document.queryCommandState('underline'),
+                    document.queryCommandState('insertOrderedList'),
+                    document.queryCommandState('insertUnorderedList'));
+            }
+            el.addEventListener('input', dbc(function () { r.dn.invokeMethodAsync('OnContentChanged', el.innerHTML); }, 150));
+            el.addEventListener('keyup',   sync);
+            el.addEventListener('mouseup', sync);
+            el.addEventListener('focus',   sync);",
+            _editorId, MinHeight, Placeholder, Value));
+
+        _lastKnownHtml = Value;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_initialised || Value == _lastKnownHtml) return;
+        await JS.InvokeVoidAsync("eval", BuildCall(@"
+            var r = window.__rte[_a0]; if (r && r.el) r.el.innerHTML = _a1 || '';",
+            _editorId, Value));
+        _lastKnownHtml = Value;
+    }
+
+    // ── JS → .NET callbacks ───────────────────────────────────────────────────
+
+    [JSInvokable]
+    public async Task OnContentChanged(string html)
+    {
+        _lastKnownHtml = html;
+        Value = html;
+        await ValueChanged.InvokeAsync(html);
+        await OnChange.InvokeAsync(html);
+    }
+
+    [JSInvokable]
+    public async Task OnSelectionChanged(bool bold, bool italic, bool underline,
+                                         bool orderedList, bool unorderedList)
+    {
+        _bold = bold; _italic = italic; _underline = underline;
+        _orderedList = orderedList; _unorderedList = unorderedList;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ── JS call helper ────────────────────────────────────────────────────────
+    // Only serialisable values (strings, numbers, nulls) go through BuildCall.
+    // DotNetObjectReference is never passed here.
+
+    private string BuildCall(string body, params object?[] args)
+    {
+        var names = string.Join(",", Enumerable.Range(0, args.Length).Select(i => $"_a{i}"));
+        var values = string.Join(",", args.Select(a => System.Text.Json.JsonSerializer.Serialize(a)));
+        return $"(function({names}){{{body}}})({values})";
+    }
+
+    // ── Exec helpers ──────────────────────────────────────────────────────────
+
+    private static readonly string JS_EXEC = @"
+        var r = window.__rte[_a0]; if (!r || !r.el) return;
+        r.el.focus();
+        document.execCommand(_a1, false, _a2 || null);
+        r.dn.invokeMethodAsync('OnContentChanged', r.el.innerHTML);
+        r.dn.invokeMethodAsync('OnSelectionChanged',
+            document.queryCommandState('bold'),
+            document.queryCommandState('italic'),
+            document.queryCommandState('underline'),
+            document.queryCommandState('insertOrderedList'),
+            document.queryCommandState('insertUnorderedList'));";
+
+    private static readonly string JS_INSERT_HTML = @"
+        var r = window.__rte[_a0]; if (!r || !r.el) return;
+        r.el.focus();
+        document.execCommand('insertHTML', false, _a1);
+        r.dn.invokeMethodAsync('OnContentChanged', r.el.innerHTML);";
+
+    private Task ExecAsync(string cmd)
+        => JS.InvokeVoidAsync("eval", BuildCall(JS_EXEC, _editorId, cmd, (object?)null)).AsTask();
+
+    private Task ExecWithArgAsync(string cmd, string? arg)
+        => arg is null ? Task.CompletedTask
+            : JS.InvokeVoidAsync("eval", BuildCall(JS_EXEC, _editorId, cmd, arg)).AsTask();
+
+    // ── Toolbar handlers ──────────────────────────────────────────────────────
+
+    private Task OnUndo() => ExecAsync("undo");
+    private Task OnRedo() => ExecAsync("redo");
+    private Task OnBold() => ExecAsync("bold");
+    private Task OnItalic() => ExecAsync("italic");
+    private Task OnUnderline() => ExecAsync("underline");
+    private Task OnOrderedList() => ExecAsync("insertOrderedList");
+    private Task OnUnorderedList() => ExecAsync("insertUnorderedList");
+
+    private Task OnFontFamilyChange(ChangeEventArgs e) => ExecWithArgAsync("fontName", e.Value?.ToString());
+    private Task OnFontSizeChange(ChangeEventArgs e) => ExecWithArgAsync("fontSize", e.Value?.ToString());
+
+    private Task OnTextColorChange(ChangeEventArgs e)
+    {
+        _textColor = e.Value?.ToString() ?? _textColor;
+        return ExecWithArgAsync("foreColor", _textColor);
+    }
+
+    private Task OnHighlightColorChange(ChangeEventArgs e)
+    {
+        _highlightColor = e.Value?.ToString() ?? _highlightColor;
+        return ExecWithArgAsync("hiliteColor", _highlightColor);
+    }
+
+    // ── Link ──────────────────────────────────────────────────────────────────
+
+    private async Task OpenLinkDialog()
+    {
+        _linkText = await JS.InvokeAsync<string>("eval",
+            BuildCall("var s=window.getSelection(); return s?s.toString():'';", _editorId)) ?? string.Empty;
+        _linkUrl  = string.Empty;
+        _showLinkDialog = true;
+    }
+
+    private void CloseLinkDialog() => _showLinkDialog = false;
+
+    private async Task InsertLinkAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_linkUrl))
+        {
+            var display = _linkText.Length > 0 ? _linkText : _linkUrl;
+            var tag = $"<a href=\"{_linkUrl}\" target=\"_blank\">{display}</a>";
+            await JS.InvokeVoidAsync("eval", BuildCall(JS_INSERT_HTML, _editorId, tag));
+        }
+        CloseLinkDialog();
+    }
+
+    // ── Table ─────────────────────────────────────────────────────────────────
+
+    private void OpenTableDialog() => _showTableDialog = true;
+    private void CloseTableDialog() => _showTableDialog = false;
+
+    private async Task InsertTableAsync()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("<table border=\"1\" style=\"border-collapse:collapse;width:100%\">");
+        for (var r = 0; r < _tableRows; r++)
+        {
+            sb.Append("<tr>");
+            for (var c = 0; c < _tableCols; c++)
+                sb.Append(r == 0 ? "<th style=\"padding:4px 8px\">&nbsp;</th>"
+                                 : "<td style=\"padding:4px 8px\">&nbsp;</td>");
+            sb.Append("</tr>");
+        }
+        sb.Append("</table><p></p>");
+        await JS.InvokeVoidAsync("eval", BuildCall(JS_INSERT_HTML, _editorId, sb.ToString()));
+        CloseTableDialog();
+    }
+
+    // ── Image ─────────────────────────────────────────────────────────────────
+
+    private void OpenImageDialog() => _showImageDialog = true;
+    private void CloseImageDialog() => _showImageDialog = false;
+
+    private async Task InsertImageAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(_imageUrl))
+        {
+            var tag = $"<img src=\"{_imageUrl}\" alt=\"{_imageAlt}\" style=\"max-width:100%\" />";
+            await JS.InvokeVoidAsync("eval", BuildCall(JS_INSERT_HTML, _editorId, tag));
+        }
+        CloseImageDialog();
+    }
+
+    // ── Disposal ──────────────────────────────────────────────────────────────
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_initialised)
+            await JS.InvokeVoidAsync("eval", BuildCall(
+                "delete (window.__rte||{})[_a0];", _editorId));
+        _dotNetRef?.Dispose();
+    }
+}

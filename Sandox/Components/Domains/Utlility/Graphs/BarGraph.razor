@@ -1,0 +1,479 @@
+﻿@* BarGraph.razor *@
+
+<div class="bg-white overflow-hidden">
+    <!-- Header -->
+    <div class="px-6 py-4 bg-white border-b border-gray-200">
+        <div class="flex items-center justify-between">
+            <h2 class="text-xl font-semibold text-gray-900">@Title</h2>
+            <div class="flex rounded-lg border border-gray-300 overflow-hidden">
+                <button type="button"
+                        class="@GetSortButtonClass(SortType.Alphabetical)"
+                        @onclick="() => SetSortType(SortType.Alphabetical)">
+                    A-Z
+                </button>
+                <button type="button"
+                        class="@GetSortButtonClass(SortType.Count)"
+                        @onclick="() => SetSortType(SortType.Count)">
+                    Count
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
+        <div class="grid grid-cols-5 gap-4">
+            <div class="bg-accent-50 p-4 rounded-lg border border-accent-200">
+                <h3 class="text-sm font-medium text-accent-800">Total Records</h3>
+                <p class="text-2xl font-bold text-accent-900">@TotalCount.ToString("N0")</p>
+            </div>
+            <div class="bg-green-50 p-4 rounded-lg border border-green-200">
+                <h3 class="text-sm font-medium text-green-800">Average Count</h3>
+                <p class="text-2xl font-bold text-green-900">@AverageCount</p>
+            </div>
+            <div class="bg-orange-50 p-4 rounded-lg border border-orange-200">
+                <h3 class="text-sm font-medium text-orange-800">Highest Category</h3>
+                <p class="text-2xl font-bold text-orange-900">@MaxCount</p>
+            </div>
+            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-800">Lowest Category</h3>
+                <p class="text-2xl font-bold text-gray-900">@MinCount</p>
+            </div>
+            <div class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h3 class="text-sm font-medium text-gray-800">Categories</h3>
+                <p class="text-2xl font-bold text-gray-900">@ChartData.Count</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chart Container -->
+    <div class="p-6">
+        @if (ChartData.Any())
+
+        {
+            <!-- Full height container without scrolling -->
+            <div class="w-full border border-gray-200 rounded-lg bg-white">
+                <svg width="100%" height="@GetChartHeight()" viewBox="5 0 100 @GetViewBoxHeight()" preserveAspectRatio="xMidYMid meet" class="bg-white"
+                     role="img" aria-label="Horizontal bar chart showing category distribution">
+                    <!-- Grid Lines -->
+                    @for (int i = 0; i <= 10; i++)
+                    {
+
+                        var x = 45 + (i * 5);
+                        <line x1="@x" y1="3" x2="@x" y2="@(GetViewBoxHeight() - 2)" stroke="#f0f0f0" stroke-dasharray="0.2,0.2" />
+                    }
+
+                    <!-- X-Axis Labels (Counts) - Fixed at top -->
+                    @for (int i = 0; i <= 10; i++)
+                    {
+
+                        var x = 45 + (i * 5);
+
+                        var value = (int)(MaxCount * i / 10.0);
+                        <svg:text x="@x" y="2" font-size="0.8" fill="#6b7280" text-anchor="middle">@value</svg:text>
+                    }
+
+                    <!-- Bars -->
+                    @for (int i = 0; i < ChartData.Count; i++)
+                    {
+
+                        var barHeight = MinBarHeight; // Fixed minimum height per bar
+
+                        var barSpacing = 0.3; // Fixed spacing between bars
+
+                        var y = 4 + (i * (barHeight + barSpacing));
+
+                        var normalizedWidth = MaxCount > 0 ? (double)ChartData[i].Count / MaxCount : 0;
+
+                        var barWidth = normalizedWidth * 50; // 50 is the chart width (95-45)
+
+                        var x = 45;
+
+                        <!-- Bar with gradient -->
+                        <defs>
+                            <linearGradient id="barGradient@(i)" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#3B82F6;stop-opacity:0.8" />
+                                <stop offset="100%" style="stop-color:#1D4ED8;stop-opacity:1" />
+                            </linearGradient>
+                        </defs>
+
+                        <rect x="@x" y="@y" width="@barWidth" height="@barHeight"
+                              fill="url(#barGradient@(i))"
+                              stroke="#1D4ED8"
+                              stroke-width="0.05"
+                              class="hover:opacity-80 transition-opacity cursor-pointer"
+                              @onmouseover="@(() => ShowTooltip(i, x + barWidth + 1, y + barHeight / 2))"
+                              @onmouseout="@HideTooltip">
+                            <title>@ChartData[i].Category: @ChartData[i].Count</title>
+                        </rect>
+
+                        <!-- Value labels at end of bars -->
+                        <svg:text x="@(x + barWidth + 0.5)" y="@(y + barHeight / 2 + 0.3)" font-size="0.8" fill="#374151" text-anchor="start" font-weight="600">
+                            @ChartData[i].Count
+                        </svg:text>
+                    }
+
+                    <!-- Y-Axis Labels (Categories) -->
+                    @for (int i = 0; i < ChartData.Count; i++)
+                    {
+
+                        var barHeight = MinBarHeight;
+
+                        var barSpacing = 0.3;
+
+                        var y = 4 + (i * (barHeight + barSpacing)) + (barHeight / 2);
+
+                        var labelText = ChartData[i].Category;
+
+
+
+                        // Truncate long labels
+
+                        if (labelText.Length > 100)
+
+                        {
+
+                            labelText = labelText.Substring(0, 97) + "...";
+
+                        }
+
+                        <!-- Category label -->
+                        <svg:text x="43" y="@(y + 0.3)" font-size="0.9" fill="#374151" text-anchor="end" font-weight="500">
+                            <title>@ChartData[i].Category</title>
+                            @labelText
+                        </svg:text>
+                    }
+
+                    <!-- X-Axis Title - Fixed at bottom -->
+                    <text x="70" y="@(GetViewBoxHeight() - 0.5)" font-size="0.8" fill="#6b7280" text-anchor="middle">Count</text>
+
+                    <!-- Y-Axis Title -->
+                    <text x="1" y="@(GetViewBoxHeight() / 2)" font-size="0.8" fill="#6b7280" text-anchor="middle" transform="rotate(-90 1 @(GetViewBoxHeight() / 2))">Categories</text>
+
+                    <!-- Axes Lines -->
+                    <line x1="45" y1="3" x2="95" y2="3" stroke="#6b7280" stroke-width="0.1" />
+                    <line x1="45" y1="3" x2="45" y2="@(GetViewBoxHeight() - 2)" stroke="#6b7280" stroke-width="0.1" />
+
+                    @if (TooltipVisible)
+                    {
+                        <rect x="@TooltipX" y="@TooltipY" width="8" height="2.5" fill="#fff" stroke="#2563eb" rx="0.3" />
+                        <svg:text x="@(TooltipX + 0.5)" y="@(TooltipY + 1.5)" font-size="0.8" fill="#2563eb">
+                            @TooltipText
+                        </svg:text>
+                    }
+                </svg>
+            </div>
+        }
+
+        else
+
+        {
+            <div class="flex items-center justify-center h-96 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
+                <div class="text-center">
+                    <svg class="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                    </svg>
+                    <h3 class="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
+                    <p class="text-sm text-gray-500">Provide a collection of BarGraphData to display the chart</p>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Category Summary -->
+    @if (ChartData.Any())
+
+    {
+        <div class="px-6 pb-6">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">Top Categories</h3>
+            <div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                @foreach (var category in ChartData.OrderByDescending(x => x.Count).Take(6))
+
+                {
+                    <div class="text-center p-3 bg-gray-50 rounded-lg">
+                        <h4 class="text-xs font-medium text-gray-600 mb-1 truncate" title="@category.Category">@category.Category</h4>
+                        <p class="text-lg font-bold text-gray-900">@category.Count</p>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<BarGraphData> DataCollection { get; set; } = new();
+
+    [Parameter] public string Title { get; set; } = "Category Distribution";
+
+    [Parameter] public SortType DefaultSortType { get; set; } = SortType.Count;
+
+
+
+    public enum SortType
+
+    {
+
+        Alphabetical,
+
+        Count
+
+    }
+
+
+
+    public class BarGraphData
+
+    {
+
+        public BarGraphData(string category)
+
+        {
+
+            Category = category;
+
+        }
+
+
+
+        public string Category { get; set; } = string.Empty;
+
+    }
+
+
+
+    public class CategoryData
+
+    {
+
+        public string Category { get; set; } = string.Empty;
+
+        public int Count { get; set; }
+
+    }
+
+
+
+    private SortType _currentSortType;
+
+    private List<CategoryData> ChartData { get; set; } = new();
+
+    private int TotalCount => ChartData.Sum(x => x.Count);
+
+    private int AverageCount => ChartData.Any() ? (int)Math.Round(ChartData.Average(x => x.Count)) : 0;
+
+    private int MaxCount => ChartData.Any() ? ChartData.Max(x => x.Count) : 0;
+
+    private int MinCount => ChartData.Any() ? ChartData.Min(x => x.Count) : 0;
+
+
+
+    // Bar sizing constants
+
+    private const double MinBarHeight = 1.5; // Minimum height for each bar (in viewBox units)
+
+
+
+    // Tooltip state
+
+    private bool TooltipVisible { get; set; }
+
+    private double TooltipX { get; set; }
+
+    private double TooltipY { get; set; }
+
+    private string TooltipText { get; set; } = "";
+
+
+
+    protected override void OnInitialized()
+
+    {
+
+        _currentSortType = DefaultSortType;
+
+    }
+
+
+
+    protected override void OnParametersSet()
+
+    {
+
+        ProcessDataCollection();
+
+    }
+
+
+
+    private void SetSortType(SortType sortType)
+
+    {
+
+        _currentSortType = sortType;
+
+        ProcessDataCollection();
+
+    }
+
+
+
+    private string GetSortButtonClass(SortType sortType)
+
+    {
+
+        var baseClass = "px-4 py-2 text-sm font-medium transition-colors";
+
+        return sortType == _currentSortType
+
+            ? $"{baseClass} bg-accent-600 text-white"
+
+            : $"{baseClass} bg-white text-gray-700 hover:bg-gray-50";
+
+    }
+
+
+
+    private void ProcessDataCollection()
+
+    {
+
+        if (DataCollection == null || !DataCollection.Any())
+
+        {
+
+            ChartData = new List<CategoryData>();
+
+            return;
+
+        }
+
+
+
+        // Group by category and count occurrences
+
+        var groupedData = DataCollection
+
+            .Where(x => !string.IsNullOrWhiteSpace(x.Category))
+
+            .GroupBy(x => x.Category.Trim())
+
+            .Select(g => new CategoryData
+
+                {
+
+                    Category = g.Key,
+
+                    Count = g.Count()
+
+                });
+
+
+
+        // Apply sorting
+
+        ChartData = _currentSortType switch
+
+        {
+
+            SortType.Alphabetical => groupedData.OrderBy(x => x.Category).ToList(),
+
+            SortType.Count => groupedData.OrderByDescending(x => x.Count).ToList(),
+
+            _ => groupedData.OrderByDescending(x => x.Count).ToList()
+
+        };
+
+
+
+        // Limit to 100 categories for performance (increased from 50)
+
+        if (ChartData.Count > 100)
+
+        {
+
+            ChartData = ChartData.Take(100).ToList();
+
+        }
+
+    }
+
+
+
+    private string GetChartHeight()
+
+    {
+
+        // Calculate dynamic height based on number of categories
+
+        // Each bar gets MinBarHeight + spacing
+
+        var heightPerBar = MinBarHeight + 0.3; // bar height + spacing
+
+        var totalHeight = (ChartData.Count * heightPerBar) + 10; // +10 for padding and axes
+
+
+
+        // Convert viewBox units to pixels (approximate)
+
+        var pixelHeight = (int)(totalHeight * 20); // Rough conversion factor
+
+
+
+        return $"{Math.Max(400, pixelHeight)}px";
+
+    }
+
+
+
+    private double GetViewBoxHeight()
+
+    {
+
+        // Calculate viewBox height to accommodate all bars with proper spacing
+
+        var heightPerBar = MinBarHeight + 0.3;
+
+        var totalHeight = (ChartData.Count * heightPerBar) + 6; // +6 for top/bottom padding and axis labels
+
+
+
+        return Math.Max(30, totalHeight);
+
+    }
+
+
+
+    private void ShowTooltip(int index, double x, double y)
+
+    {
+
+        if (index < 0 || index >= ChartData.Count)
+
+            return;
+
+
+
+        TooltipVisible = true;
+
+        TooltipX = x - 4; // Center the tooltip
+
+        TooltipY = y - 3;
+
+        TooltipText = $"{ChartData[index].Category}: {ChartData[index].Count}";
+
+        StateHasChanged();
+
+    }
+
+
+
+    private void HideTooltip()
+
+    {
+
+        TooltipVisible = false;
+
+        StateHasChanged();
+
+    }
+}

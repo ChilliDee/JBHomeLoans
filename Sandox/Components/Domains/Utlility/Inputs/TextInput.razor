@@ -1,0 +1,331 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@using System.Text.RegularExpressions
+@using System.Timers
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<div class="relative">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+        @Label
+    </label>
+    <input type="text"
+           name="@Name"
+           id="@Id"
+           @bind-value="Value"
+           @bind-value:event="oninput"
+           @bind-value:after="HandleInputAfter"
+           @onchange="HandleChange"
+           disabled="@IsDisabled"
+           readonly="@ReadOnly"
+           aria-readonly="@(ReadOnly ? "true" : "false")"
+           class="@GetInputClasses()"
+           placeholder="@Placeholder"
+           @ref="inputRef" />
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Func<Task>? AsyncInputCallBack { get; set; }
+    [Parameter] public Action<string?>? OnChange { get; set; }
+    [Parameter] public Action<string?>? OnInput { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = string.Empty;
+    [Parameter] public bool Disabled { get; set; } = false;
+
+    /// <summary>
+    /// Read-only: value can be selected/copied but not edited. Unlike Disabled, does not set the
+    /// HTML disabled attribute (which blocks selection) and keeps full text contrast.
+    /// </summary>
+    [Parameter] public bool ReadOnly { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public int DebounceMilliseconds { get; set; } = 0;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public bool AutoFocus { get; set; } = false;
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationUnref { get; set; }
+    [Parameter] public Func<string?>? CustomValidation { get; set; }
+    [Parameter] public string? ValidationMessage { get; set; }
+
+    /// <summary>
+    /// Regex pattern validated as the user types. Non-matching input is silently rejected
+    /// and the value reverts to the last valid state.
+    /// </summary>
+    [Parameter] public string? RegexValidation { get; set; }
+
+    /// <summary>
+    /// Error message shown when RegexValidation fails at submit time (ValidateAll).
+    /// </summary>
+    [Parameter] public string? RegexValidationMessage { get; set; }
+
+    /// <summary>
+    /// Maximum number of characters allowed. Characters beyond this limit are rejected as the user types.
+    /// </summary>
+    [Parameter] public int? MaxLength { get; set; }
+
+    /// <summary>
+    /// Runs every time the value changes. Return (false, "error message") to show an inline error.
+    /// Does not participate in the ValidationRef flow.
+    /// </summary>
+    [Parameter] public Func<Task<(bool IsValid, string ErrorMessage)>>? OnChangeValidation { get; set; }
+
+    /// <summary>
+    /// Debounce delay in milliseconds for OnChangeValidation. Defaults to 300ms.
+    /// </summary>
+    [Parameter] public int OnChangeValidationDebounceMs { get; set; } = 300;
+
+    /// <summary>
+    /// Async version of CustomValidation. Runs as part of the ValidationRef flow when ValidateAll() is called.
+    /// Return (false, "error message") to fail validation.
+    /// </summary>
+    [Parameter] public Func<Task<(bool IsValid, string ErrorMessage)>>? CustomValidationAsync { get; set; }
+
+    private bool _isDisposed = false;
+    private Timer? _debounceTimer;
+    private CancellationTokenSource? _onChangeValidationCts;
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+    private string? _lastValidValue;
+    private ElementReference inputRef;
+
+    protected override void OnParametersSet()
+    {
+        _lastValidValue ??= Value;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && AutoFocus && !IsDisabled)
+        {
+            await JSRuntime.InvokeVoidAsync("textInputHelper.focusAndSelect", inputRef);
+        }
+    }
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+        ValidationRef?.Invoke(Validate);
+        base.OnInitialized();
+    }
+
+    public void Dispose()
+    {
+        _isDisposed = true;
+        ValidationUnref?.Invoke(Validate);
+        _debounceTimer?.Stop();
+        _debounceTimer?.Dispose();
+        _debounceTimer = null;
+        _onChangeValidationCts?.Cancel();
+        _onChangeValidationCts?.Dispose();
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && string.IsNullOrEmpty(Value))
+        {
+            isInvalid = true;
+            errorMessage = ValidationMessage ?? $"{Label} is required.";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (!string.IsNullOrEmpty(Value))
+        {
+            if (!string.IsNullOrEmpty(RegexValidation) && !Regex.IsMatch(Value, RegexValidation))
+            {
+                isInvalid = true;
+                errorMessage = RegexValidationMessage ?? $"{Label} is invalid.";
+                StateHasChanged();
+                return (false, Label);
+            }
+
+            var customError = CustomValidation?.Invoke();
+            if (!string.IsNullOrEmpty(customError))
+            {
+                isInvalid = true;
+                errorMessage = customError;
+                StateHasChanged();
+                return (false, Label);
+            }
+
+            if (CustomValidationAsync != null)
+            {
+                var result = CustomValidationAsync().GetAwaiter().GetResult();
+                if (!result.IsValid)
+                {
+                    isInvalid = true;
+                    errorMessage = result.ErrorMessage;
+                    StateHasChanged();
+                    return (false, Label);
+                }
+            }
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private string GetInputClasses()
+    {
+        var baseClasses = "border-none block w-full rounded-md px-3 py-1.5 text-base outline-1 -outline-offset-1 placeholder:text-gray-400 sm:text-sm/6";
+
+        if (IsDisabled)
+            return $"{baseClasses} bg-gray-50 text-gray-500 outline-gray-200 cursor-not-allowed";
+
+        if (ReadOnly)
+            return $"{baseClasses} bg-gray-50 text-gray-900 outline-gray-300 cursor-default";
+
+        if (Highlight)
+            return $"{baseClasses} text-gray-900 outline-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600";
+
+        if (isInvalid)
+            return $"{baseClasses} bg-white text-gray-900 outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-500";
+
+        return $"{baseClasses} bg-white text-gray-900 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+    }
+
+    private async Task HandleInputAfter()
+    {
+        if (IsDisabled || ReadOnly || _isDisposed) return;
+
+        // block bind if max length exceeded
+        if (MaxLength.HasValue && !string.IsNullOrEmpty(Value) && Value.Length > MaxLength.Value)
+        {
+            isInvalid = true;
+            errorMessage = RegexValidationMessage ?? $"{Label} is invalid.";
+            Value = _lastValidValue;
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        // block bind if regex fails
+        if (!string.IsNullOrEmpty(RegexValidation) && !string.IsNullOrEmpty(Value))
+        {
+            if (!Regex.IsMatch(Value, RegexValidation))
+            {
+                isInvalid = true;
+                errorMessage = RegexValidationMessage ?? $"{Label} is invalid.";
+                Value = _lastValidValue;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+        }
+
+        // all checks passed — clear any previous error, update last valid value and proceed
+        isInvalid = false;
+        errorMessage = string.Empty;
+        _lastValidValue = Value;
+
+        if (DebounceMilliseconds > 0)
+        {
+            _debounceTimer?.Stop();
+            _debounceTimer?.Dispose();
+
+            _debounceTimer = new Timer(DebounceMilliseconds);
+            _debounceTimer.Elapsed += async (_, __) =>
+            {
+                _debounceTimer?.Stop();
+                _debounceTimer?.Dispose();
+                _debounceTimer = null;
+
+                await InvokeAsync(async () =>
+                {
+                    if (_isDisposed) return;
+                    OnInput?.Invoke(Value);
+                    if (!_isDisposed)
+                        await ValueChanged.InvokeAsync(Value);
+                    if (AsyncInputCallBack != null && !_isDisposed)
+                        await AsyncInputCallBack();
+                });
+            };
+            _debounceTimer.AutoReset = false;
+            _debounceTimer.Start();
+        }
+        else
+        {
+            try
+            {
+                OnInput?.Invoke(Value);
+                if (!_isDisposed)
+                    await ValueChanged.InvokeAsync(Value);
+                if (AsyncInputCallBack != null && !_isDisposed)
+                    await AsyncInputCallBack();
+            }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled || ReadOnly || _isDisposed) return;
+
+        // A native change (e.g. Enter) can fire before a pending debounce timer has
+        // propagated the latest Value to the parent. Flush it now so AsyncCallBack
+        // doesn't act on a stale bound value.
+        _debounceTimer?.Stop();
+        _debounceTimer?.Dispose();
+        _debounceTimer = null;
+        await ValueChanged.InvokeAsync(Value);
+
+        if (!string.IsNullOrEmpty(Value))
+        {
+            isInvalid = false;
+            errorMessage = string.Empty;
+        }
+
+        try
+        {
+            OnChange?.Invoke(Value);
+            if (AsyncCallBack != null && !_isDisposed)
+                await AsyncCallBack();
+        }
+        catch (ObjectDisposedException) { }
+
+        await RunOnChangeValidationAsync();
+    }
+
+    private async Task RunOnChangeValidationAsync()
+    {
+        if (OnChangeValidation == null || _isDisposed) return;
+
+        _onChangeValidationCts?.Cancel();
+        _onChangeValidationCts = new CancellationTokenSource();
+        var token = _onChangeValidationCts.Token;
+
+        try
+        {
+            await Task.Delay(OnChangeValidationDebounceMs, token);
+        }
+        catch (TaskCanceledException)
+        {
+            return;
+        }
+
+        if (token.IsCancellationRequested || _isDisposed) return;
+
+        var result = await OnChangeValidation();
+        if (!result.IsValid)
+        {
+            isInvalid = true;
+            errorMessage = result.ErrorMessage;
+        }
+        else
+        {
+            isInvalid = false;
+            errorMessage = string.Empty;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+}

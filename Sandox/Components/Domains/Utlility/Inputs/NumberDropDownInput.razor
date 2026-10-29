@@ -1,0 +1,508 @@
+﻿@using Microsoft.AspNetCore.Components
+@using Microsoft.JSInterop
+@using System.Globalization
+@inject IJSRuntime JS
+@implements IDisposable
+@typeparam TValue
+
+<div class="relative" @ref="containerRef" style="@(!string.IsNullOrEmpty(MaxWidth) ? $"max-width:{MaxWidth};" : "")">
+    <label for="@Id" class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">
+        @Label
+    </label>
+
+    <input type="number"
+           name="@Name"
+           id="@Id"
+           @ref="inputRef"
+           value="@Value?.ToString()"
+           disabled="@IsDisabled"
+           @onchange="HandleChange"
+           @onkeydown="HandleKeyDown"
+           @onfocus="HandleFocus"
+           @onclick="HandleClick"
+           step="@GetStep()"
+           min="@Min?.ToString()"
+           max="@Max?.ToString()"
+           class="block w-full rounded-md px-3 py-1.5 text-base outline-1 -outline-offset-1 sm:text-sm/6 min-h-[38px] @GetInputClasses()"
+           placeholder="@Placeholder" />
+
+    @if (showDropdown || _dropdownAttached)
+    {
+        <ul @ref="dropdownRef"
+    tabindex="-1"
+    class="rounded-md bg-white py-1 text-base shadow-lg ring-1 ring-black/10 focus:outline-none sm:text-sm max-h-52 overflow-y-auto transition-opacity duration-75 @(_dropdownVisible ? "opacity-100" : "opacity-0 hidden")">
+    @foreach (var number in GetRangeNumbers())
+    {
+                var captured = number;
+                <li @onclick="() => SelectPresetAsync(captured)"
+                    @onmousedown:preventDefault="true"
+                    class="@GetPresetItemClasses(captured)">
+                    @if (IsSelected(captured))
+                    {
+                        <span class="absolute inset-y-0 left-0 flex items-center pl-1.5 text-accent-600">
+                            <svg class="size-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fill-rule="evenodd" d="M16.704 4.153a.75.75 0 0 1 .143 1.052l-8 10.5a.75.75 0 0 1-1.127.075l-4.5-4.5a.75.75 0 0 1 1.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 0 1 1.05-.143Z" clip-rule="evenodd" />
+                            </svg>
+                        </span>
+                    }
+                    @captured
+                </li>
+            }
+        </ul>
+    }
+
+    @if (isInvalid && !string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="mt-1 text-xs text-red-600">@errorMessage</div>
+    }
+</div>
+
+@code {
+    // ── Inherited parameters ──────────────────────────────────────────────────
+    [Parameter] public TValue? Value { get; set; }
+    [Parameter] public EventCallback<TValue?> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public Action<TValue?>? OnChange { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string Placeholder { get; set; } = string.Empty;
+    [Parameter] public int DecimalPlaces { get; set; } = 2;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Highlight { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public TValue? Min { get; set; }
+    [Parameter] public TValue? Max { get; set; }
+
+    /// <summary>
+    /// Pass your code-behind AddValidator method here. The component self-registers
+    /// its Validate method into your validator list on initialisation.
+    /// </summary>
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    // ── Range dropdown parameters ─────────────────────────────────────────────
+
+    /// <summary>First number in the preset dropdown list (inclusive).</summary>
+    [Parameter] public int RangeStart { get; set; } = 1;
+
+    /// <summary>Last number in the preset dropdown list (inclusive).</summary>
+    [Parameter] public int RangeEnd { get; set; } = 10;
+
+    /// <summary>
+    /// Interval between preset numbers. Defaults to 1.
+    /// E.g. RangeStart=0, RangeEnd=100, RangeStep=10 → 0, 10, 20 … 100.
+    /// </summary>
+    [Parameter] public int RangeStep { get; set; } = 1;
+
+    /// <summary>Whether to show the input border/outline. Defaults to true.</summary>
+    [Parameter] public bool ShowBorder { get; set; } = true;
+
+    /// <summary>Optional max-width for the whole control e.g. "120px", "6rem". Defaults to no constraint.</summary>
+    [Parameter] public string MaxWidth { get; set; } = string.Empty;
+
+    // ── Private state ─────────────────────────────────────────────────────────
+    private bool isInvalid = false;
+    private string errorMessage = string.Empty;
+    private bool showDropdown = false;
+    private bool _dropdownAttached = false;
+    private bool _dropdownVisible = false;
+    private bool _justGotFocus = false; // distinguishes a focus-causing click from a re-click on an already-focused input
+
+    // ── Element references ────────────────────────────────────────────────────
+    private ElementReference inputRef;
+    private ElementReference containerRef;
+    private ElementReference dropdownRef;
+    private DotNetObjectReference<NumberDropDownInput<TValue>>? dotNetRef;
+
+    // ── Computed disabled ─────────────────────────────────────────────────────
+    private bool IsDisabled => Disabled;
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    protected override void OnInitialized()
+    {
+        dotNetRef = DotNetObjectReference.Create(this);
+
+        base.OnInitialized();
+
+        ValidationRef?.Invoke(Validate);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await base.OnAfterRenderAsync(firstRender);
+
+        // ── Open: attach to body ──────────────────────────────────────────────
+        if (showDropdown && !IsDisabled && !_dropdownAttached)
+        {
+            try
+            {
+                _dropdownVisible = false;
+
+                await Task.Delay(50); // let Blazor finish patching the DOM
+
+                await JS.InvokeVoidAsync(
+                    "numberDropdown_setupClickOutside",
+                    containerRef,
+                    dropdownRef,
+                    dotNetRef);
+
+                await JS.InvokeVoidAsync(
+                    "numberDropdown_attachToBody",
+                    dropdownRef,
+                    containerRef);
+
+                _dropdownAttached = true;
+                _dropdownVisible = true;
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NumberDropdownInput] attach error: {ex.Message}");
+            }
+        }
+        // ── Close: detach from body ───────────────────────────────────────────
+        else if (!showDropdown && _dropdownAttached)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync(
+                    "numberDropdown_detachFromBody",
+                    dropdownRef,
+                    containerRef);
+
+                await JS.InvokeVoidAsync(
+                    "numberDropdown_removeClickOutside",
+                    containerRef);
+
+                _dropdownAttached = false;
+
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[NumberDropdownInput] detach error: {ex.Message}");
+            }
+        }
+    }
+
+    // ── Dropdown helpers ──────────────────────────────────────────────────────
+    private void SetClosed()
+    {
+        showDropdown = false;
+        _dropdownVisible = false;
+    }
+
+    private IEnumerable<int> GetRangeNumbers()
+    {
+        var step = RangeStep < 1 ? 1 : RangeStep;
+        var start = Math.Min(RangeStart, RangeEnd);
+        var end = Math.Max(RangeStart, RangeEnd);
+
+        var last = start;
+        for (var i = start; i <= end; i += step)
+        {
+            last = i;
+            yield return i;
+        }
+
+        // If the step didn't land exactly on end, append it explicitly.
+        if (last != end)
+            yield return end;
+    }
+
+    private void HandleFocus()
+    {
+        if (IsDisabled) return;
+        _justGotFocus = true; // flag so HandleClick knows this click caused the focus
+        if (!showDropdown)
+            showDropdown = true;
+    }
+
+    private void HandleClick()
+    {
+        if (IsDisabled) return;
+
+        if (_justGotFocus)
+        {
+            // This click is what brought focus to the input — onfocus already opened
+            // the dropdown, so don't toggle it closed here.
+            _justGotFocus = false;
+            return;
+        }
+
+        // Already-focused re-click: toggle
+        if (showDropdown)
+            SetClosed();
+        else
+            showDropdown = true;
+    }
+
+    [JSInvokable]
+    public void CloseFromClickOutside()
+    {
+        if (!showDropdown || IsDisabled) return;
+
+        SetClosed();
+        StateHasChanged();
+    }
+
+    private async Task SelectPresetAsync(int number)
+    {
+        SetClosed();
+
+        Value = ConvertToValue(number.ToString());
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        OnChange?.Invoke(Value);
+        await ValueChanged.InvokeAsync(Value);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+    }
+
+    private bool IsSelected(int number)
+    {
+        if (Value == null) return false;
+        return Value.ToString() == number.ToString();
+    }
+
+    // ── Keyboard handler ──────────────────────────────────────────────────────
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || IsDisabled) return;
+
+        if (showDropdown)
+            SetClosed();
+        else
+            showDropdown = true;
+    }
+
+    // ── Validation ────────────────────────────────────────────────────────────
+    private (bool IsValid, string Label) Validate()
+    {
+        var underlyingType = Nullable.GetUnderlyingType(typeof(TValue));
+        var isEmpty = underlyingType != null && Value == null;
+
+        if (Required && isEmpty)
+        {
+            isInvalid = true;
+            errorMessage = $"{Label} is required";
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (!isEmpty && Value is IComparable comparableValue)
+        {
+            if (Min != null && comparableValue.CompareTo(Min) < 0)
+            {
+                isInvalid = true;
+                errorMessage = $"{Label} must be at least {Min}";
+                StateHasChanged();
+                return (false, Label);
+            }
+
+            if (Max != null && comparableValue.CompareTo(Max) > 0)
+            {
+                isInvalid = true;
+                errorMessage = $"{Label} must be no more than {Max}";
+                StateHasChanged();
+                return (false, Label);
+            }
+        }
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    // ── CSS helpers ───────────────────────────────────────────────────────────
+    private string GetStep()
+    {
+        var underlyingType = Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue);
+
+        if (underlyingType == typeof(int))
+            return "1";
+
+        if (underlyingType == typeof(decimal))
+            return DecimalPlaces > 0 ? $"0.{new string('0', DecimalPlaces - 1)}1" : "1";
+
+        return "1";
+    }
+
+    private string GetInputClasses()
+    {
+        const string base_ = "border-none outline-none bg-transparent placeholder:text-gray-400";
+
+        if (IsDisabled)
+            return $"{base_} text-gray-500 cursor-not-allowed outline-gray-200 bg-gray-50";
+
+        if (Highlight)
+            return $"{base_} text-gray-900 outline-amber-400 focus:outline-2 focus:-outline-offset-2 focus:outline-amber-600";
+
+        if (isInvalid)
+            return $"{base_} text-gray-900 outline-red-500 focus:outline-2 focus:-outline-offset-2 focus:outline-red-600";
+
+        return $"{base_} text-gray-900 outline-gray-300 focus:outline-2 focus:-outline-offset-2 focus:outline-accent-600";
+    }
+
+    private string GetPresetItemClasses(int number)
+    {
+        const string base_ = "relative w-full text-left px-3 py-2 pr-4 pl-8 text-sm cursor-pointer transition-colors list-none select-none";
+
+        return IsSelected(number)
+            ? $"{base_} text-gray-900 font-semibold"
+            : $"{base_} text-gray-700 font-normal hover:bg-gray-300";
+    }
+
+    // ── Event handlers ────────────────────────────────────────────────────────
+    private async Task HandleChange(ChangeEventArgs e)
+    {
+        if (IsDisabled) return;
+
+        var stringValue = e.Value?.ToString();
+        Value = string.IsNullOrEmpty(stringValue) ? default : ConvertToValue(stringValue);
+
+        isInvalid = false;
+        errorMessage = string.Empty;
+
+        OnChange?.Invoke(Value);
+        await ValueChanged.InvokeAsync(Value);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack();
+    }
+
+    private TValue? ConvertToValue(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return default;
+
+        var underlyingType = Nullable.GetUnderlyingType(typeof(TValue)) ?? typeof(TValue);
+
+        try
+        {
+            if (underlyingType == typeof(int))
+            {
+                var intValue = int.Parse(value, NumberStyles.Integer, CultureInfo.CurrentCulture);
+                return (TValue?)(object)intValue;
+            }
+
+            if (underlyingType == typeof(decimal))
+            {
+                var decimalValue = decimal.Parse(value, NumberStyles.Number, CultureInfo.CurrentCulture);
+                return (TValue?)(object)decimalValue;
+            }
+        }
+        catch
+        {
+            return default;
+        }
+
+        return default;
+    }
+
+    // ── Dispose ───────────────────────────────────────────────────────────────
+    public void Dispose()
+    {
+
+        try { JS.InvokeVoidAsync("numberDropdown_removeClickOutside", containerRef); } catch { }
+        try { JS.InvokeVoidAsync("numberDropdown_detachFromBody", dropdownRef, containerRef); } catch { }
+
+        dotNetRef?.Dispose();
+    }
+}
+
+<script>
+    // ── Click-outside listener ────────────────────────────────────────────────
+    window.numberDropdown_setupClickOutside = (containerEl, dropdownEl, dotNetRef) => {
+        if (!containerEl || !dropdownEl) return;
+
+        window.numberDropdown_removeClickOutside(containerEl);
+
+        const handler = (e) => {
+            const insideContainer = containerEl.contains(e.target);
+            const insideDropdown  = dropdownEl.contains(e.target);
+
+            if (!insideContainer && !insideDropdown) {
+                try {
+                    dotNetRef.invokeMethodAsync('CloseFromClickOutside');
+                } catch {
+                    window.numberDropdown_removeClickOutside(containerEl);
+                }
+            }
+        };
+
+        containerEl._numberDropdownClickOutside = handler;
+        document.addEventListener('click', handler, true);
+    };
+
+    window.numberDropdown_removeClickOutside = (containerEl) => {
+        if (containerEl && containerEl._numberDropdownClickOutside) {
+            document.removeEventListener('click', containerEl._numberDropdownClickOutside, true);
+            delete containerEl._numberDropdownClickOutside;
+        }
+    };
+
+    // ── Body portal ───────────────────────────────────────────────────────────
+    window.numberDropdown_attachToBody = (dropdownEl, containerEl) => {
+        if (!dropdownEl || !containerEl) return;
+
+        const reposition = () => {
+            if (!document.body.contains(containerEl)) return;
+
+            const rect = containerEl.getBoundingClientRect();
+            dropdownEl.style.position = 'fixed';
+            dropdownEl.style.top      = `${rect.bottom + 4}px`;
+            dropdownEl.style.left     = `${rect.left}px`;
+            dropdownEl.style.minWidth = `${rect.width}px`;
+            dropdownEl.style.width    = 'max-content';
+            dropdownEl.style.zIndex   = '9999';
+            dropdownEl.style.margin   = '0';
+            dropdownEl.style.display  = 'block';
+        };
+
+        if (!dropdownEl._numberDropdownOriginalParent) {
+            dropdownEl._numberDropdownOriginalParent = dropdownEl.parentElement;
+        }
+
+        if (dropdownEl.parentElement !== document.body) {
+            document.body.appendChild(dropdownEl);
+        }
+
+        requestAnimationFrame(() => requestAnimationFrame(reposition));
+
+        dropdownEl._numberDropdownReposition = reposition;
+        window.addEventListener('scroll', reposition, true);
+        window.addEventListener('resize', reposition, true);
+    };
+
+    window.numberDropdown_detachFromBody = (dropdownEl, containerEl) => {
+        if (!dropdownEl) return;
+
+        dropdownEl.style.display = 'none';
+
+        if (dropdownEl._numberDropdownReposition) {
+            window.removeEventListener('scroll', dropdownEl._numberDropdownReposition, true);
+            window.removeEventListener('resize', dropdownEl._numberDropdownReposition, true);
+            delete dropdownEl._numberDropdownReposition;
+        }
+
+        const target = containerEl || dropdownEl._numberDropdownOriginalParent;
+        if (target && document.body.contains(target)) {
+            target.appendChild(dropdownEl);
+        }
+
+        dropdownEl.style.position = '';
+        dropdownEl.style.top      = '';
+        dropdownEl.style.left     = '';
+        dropdownEl.style.minWidth = '';
+        dropdownEl.style.width    = '';
+        dropdownEl.style.zIndex   = '';
+        dropdownEl.style.margin   = '';
+
+        delete dropdownEl._numberDropdownOriginalParent;
+    };
+</script>

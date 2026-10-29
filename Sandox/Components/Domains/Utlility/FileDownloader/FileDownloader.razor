@@ -1,0 +1,200 @@
+﻿    @using Microsoft.JSInterop
+    @inject IJSRuntime JSRuntime
+
+    <button class="@CssClass" @onclick="HandleDownloadClick" disabled="@IsDownloading">
+        @if (ChildContent != null)
+        {
+            @ChildContent
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(IconClass))
+            {
+                <i class="@IconClass me-2"></i>
+            }
+            @ButtonText
+        }
+    </button>
+
+    @* ========== PROGRESS MODAL ========== *@
+
+    @if (IsDownloading)
+    {
+        <div class="download-modal-backdrop"></div>
+
+        <div class="download-modal-container">
+            <div class="download-modal">
+
+                <div class="download-header">
+                    <i class="fas fa-download me-2"></i>
+                    Downloading File
+                </div>
+
+                <div class="download-body">
+
+                    <div class="filename">@FileName</div>
+
+                    <div class="spinner-container">
+                        <div class="spinner"></div>
+                    </div>
+
+                    <div class="hint">
+                        Please keep this window open until the download finishes.
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    }
+
+    <style>
+        .download-modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 9998;
+            backdrop-filter: blur(2px);
+        }
+
+        .download-modal-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .download-modal {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            min-width: 400px;
+            max-width: 500px;
+            pointer-events: auto;
+            animation: modalFadeIn 0.2s ease-out;
+        }
+
+        @@keyframes modalFadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .download-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 18px;
+            font-weight: 600;
+            color: #111827;
+            display: flex;
+            align-items: center;
+        }
+
+        .download-body {
+            padding: 24px;
+        }
+
+        .filename {
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 20px;
+            word-break: break-word;
+        }
+
+        .spinner-container {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f4f6;
+            border-top: 4px solid #3b82f6;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @@keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .hint {
+            font-size: 13px;
+            color: #9ca3af;
+            text-align: center;
+            font-style: italic;
+        }
+    </style>
+
+    @code {
+
+        private bool IsDownloading = false;
+
+        [Parameter, EditorRequired] public Func<Task<byte[]>> GetFileBytesAsync { get; set; } = null!;
+        [Parameter, EditorRequired] public string FileName { get; set; } = string.Empty;
+
+        [Parameter] public bool IsCompressed { get; set; } = false;
+
+        [Parameter] public string ButtonText { get; set; } = "Download";
+        [Parameter] public string IconClass { get; set; } = "fas fa-download";
+        [Parameter] public string CssClass { get; set; } = "btn btn-primary";
+
+        [Parameter] public RenderFragment? ChildContent { get; set; }
+
+        [Parameter] public EventCallback<string> OnDownloadStarted { get; set; }
+        [Parameter] public EventCallback<string> OnDownloadCompleted { get; set; }
+        [Parameter] public EventCallback<string> OnDownloadError { get; set; }
+
+        private async Task HandleDownloadClick()
+        {
+            if (IsDownloading) return;
+
+            try
+            {
+                IsDownloading = true;
+                StateHasChanged();
+
+                await OnDownloadStarted.InvokeAsync(FileName);
+
+                byte[] fileBytes = await GetFileBytesAsync();
+
+                if (IsCompressed)
+                    await JSRuntime.InvokeVoidAsync("downloadCompressedFile", FileName, fileBytes);
+                else
+                    await JSRuntime.InvokeVoidAsync("downloadFileFromByteArray", FileName, fileBytes);
+
+                await OnDownloadCompleted.InvokeAsync(FileName);
+            }
+            catch (Exception ex)
+            {
+                await OnDownloadError.InvokeAsync(ex.Message);
+            }
+            finally
+            {
+                IsDownloading = false;
+                StateHasChanged();
+            }
+        }
+    }

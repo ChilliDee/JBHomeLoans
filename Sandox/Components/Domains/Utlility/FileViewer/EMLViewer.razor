@@ -1,0 +1,106 @@
+﻿@using MimeKit
+@using MsgReader.Outlook
+@using System.Text
+@using System.Net
+
+<div class="w-full h-full min-h-0 min-w-0 overflow-hidden">
+    <iframe src="@_src"
+            class="w-full h-full border-none block">
+    </iframe>
+</div>
+
+@code {
+    public enum EmailType { Eml, Msg }
+
+    [Parameter] public byte[] FileBytes { get; set; }
+    [Parameter] public EmailType Type { get; set; } = EmailType.Eml;
+
+
+    [Parameter] public string EmailBody { get; set; }
+[Parameter] public bool IsHtml { get; set; } = true;
+
+protected override async Task OnParametersSetAsync()
+{
+    string html = null;
+
+    if (!string.IsNullOrEmpty(EmailBody))
+    {
+        html = IsHtml ? EmailBody : $"<pre>{WebUtility.HtmlEncode(EmailBody)}</pre>";
+    }
+    else if (FileBytes is { Length: > 0 })
+    {
+        html = Type == EmailType.Msg ? ParseMsg() : await ParseEmlAsync();
+    }
+
+    if (html != null)
+    {
+        var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(html));
+        _src = $"data:text/html;charset=utf-8;base64,{base64}";
+    }
+}
+
+    private string _src;
+
+    // protected override async Task OnParametersSetAsync()
+    // {
+    //     if (FileBytes is { Length: > 0 })
+    //     {
+    //         var html = Type == EmailType.Msg
+    //             ? ParseMsg()
+    //             : await ParseEmlAsync();
+
+    //         var base64 = Convert.ToBase64String(Encoding.UTF8.GetBytes(html));
+    //         _src = $"data:text/html;base64,{base64}";
+    //     }
+    // }
+
+    private async Task<string> ParseEmlAsync()
+    {
+        try
+        {
+            using var stream = new MemoryStream(FileBytes);
+            var message = await MimeMessage.LoadAsync(stream);
+            return message.HtmlBody
+                ?? $"<html><head><meta charset=\"utf-8\"></head><body><pre>{WebUtility.HtmlEncode(message.TextBody)}</pre></body></html>";
+        }
+        catch(Exception ex)
+        {
+             return @"<div style='height:100%;
+                    width:100%;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    font-size:.75rem;
+                    font-family:ui-sans-serif,system-ui,sans-serif,
+                        ""Apple Color Emoji"",""Segoe UI Emoji"",
+                        ""Segoe UI Symbol"",""Noto Color Emoji"">
+                    This file cannot be previewed
+                </div>";
+        }
+    }
+
+    private string ParseMsg()
+    {
+        try
+        {
+            using var stream = new MemoryStream(FileBytes);
+            using var message = new Storage.Message(stream);
+            return message.BodyHtml
+                ?? $"<html><head><meta charset=\"utf-8\"></head><body><pre>{WebUtility.HtmlEncode(message.BodyText)}</pre></body></html>";
+        }
+        catch (Exception ex)
+        {
+            return @"<div style='height:100%;
+                        width:100%;
+                        display:flex;
+                        align-items:center;
+                        justify-content:center;
+                        font-size:.75rem;
+                        font-family:ui-sans-serif,system-ui,sans-serif,
+                            ""Apple Color Emoji"",""Segoe UI Emoji"",
+                            ""Segoe UI Symbol"",""Noto Color Emoji"">
+                        This file cannot be previewed
+                    </div>";
+        }
+    }
+}

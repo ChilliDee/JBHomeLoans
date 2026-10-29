@@ -1,0 +1,255 @@
+@using Microsoft.AspNetCore.Components
+@implements IDisposable
+
+<div class="relative">
+    @if (!string.IsNullOrEmpty(Label))
+    {
+        <label class="absolute -top-2 left-2 inline-block rounded-lg bg-white px-1 text-xs font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900") z-10">
+            @Label
+        </label>
+    }
+
+    <div class="block w-full rounded-md @(IsDisabled ? "bg-gray-50" : "") @GetContainerBorderCss() py-1.5 px-1">
+        @if (Items == null || !Items.Any())
+        {
+            <p class="text-sm text-gray-400 px-1">No options available.</p>
+        }
+        else
+        {
+            <div class="flex items-center gap-2 mb-1 p-4">
+                <input type="checkbox"
+                       checked="@(_selectedIndices.Count == Items.Count)"
+                       disabled="@IsDisabled"
+                       class="h-4 w-4 rounded border-gray-300 text-accent-600 focus:ring-accent-500 @(IsDisabled ? "cursor-not-allowed" : "cursor-pointer")"
+                       @onchange="ToggleSelectAllAsync" />
+                <span class="text-xs font-medium @(IsDisabled ? "text-gray-300" : "text-gray-600")">
+                    @(_selectedIndices.Count == Items.Count ? "Deselect all" : "Select all")
+                </span>
+            </div>
+            <div class="flex flex-col gap-2">
+                @for (var i = 0; i < Items.Count; i++)
+                {
+                    var index = i;
+                    var item = Items[index];
+                    <div class="@GetRowCss(index)"
+                         @onclick="async () => {
+                         if (!IsDisabled)
+                         {
+                             await ToggleItemAsync(index);
+                         }
+                     }">
+                      <div class="flex flex-col">
+                          <span class="text-sm font-medium @(IsDisabled ? "text-gray-400" : "text-gray-900")">@item.Description</span>
+                        @if (!string.IsNullOrEmpty(item.Subtitle))
+                        {
+                            <span class="text-xs @(IsDisabled ? "text-gray-400" : "text-gray-500")">@item.Subtitle</span>
+                        }
+                    </div>
+                    @if (_selectedIndices.Contains(index))
+                    {
+                        <svg class="w-4 h-4 text-accent-600 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    }
+                </div>
+            }
+        </div>
+                }
+    </div>
+
+    @if (_isInvalid)
+    {
+        <div class="mt-1 text-xs text-red-600">This field is required</div>
+    }
+</div>
+
+@code {
+
+    [Parameter] public List<MultiSelectableListInputOption> Items { get; set; } = new();
+    [Parameter] public List<MultiSelectableListInputOption> Value { get; set; } = new();
+    [Parameter] public EventCallback<List<MultiSelectableListInputOption>> ValueChanged { get; set; }
+    [Parameter] public Func<Task>? AsyncCallBack { get; set; }
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public bool Disabled { get; set; } = false;
+    [Parameter] public bool Required { get; set; } = false;
+    [Parameter] public int? MinSelections { get; set; }
+    [Parameter] public int? MaxSelections { get; set; }
+    [Parameter] public Action<Func<(bool IsValid, string Label)>>? ValidationRef { get; set; }
+
+    private HashSet<int> _selectedIndices = new();
+    private bool _isInvalid = false;
+
+    private bool IsDisabled => Disabled;
+
+    protected override void OnInitialized()
+    {
+
+        if (Required && ValidationRef != null)
+        {
+            ValidationRef(() => Validate());
+        }
+
+        base.OnInitialized();
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Re-resolve on every parameter set (not just once) so that previously
+        // saved items which arrive on Value asynchronously (e.g. after an
+        // Initialise_HD DB load completes post-first-render) still get
+        // pre-selected. This is safe/idempotent � Value and _selectedIndices
+        // are already kept in sync by ToggleItemAsync, so re-resolving from
+        // our own toggles produces the same result.
+        _selectedIndices = ResolveInitialIndices(Value);
+    }
+
+    private HashSet<int> ResolveInitialIndices(List<MultiSelectableListInputOption>? value)
+    {
+        var resolved = new HashSet<int>();
+        if (value == null || Items == null) return resolved;
+
+        foreach (var selected in value)
+        {
+            // Match by reference first (handles null/duplicate Ids cleanly),
+            // then fall back to Id match for cases where a fresh instance was passed in.
+            var refIndex = Items.IndexOf(selected);
+            if (refIndex >= 0)
+            {
+                resolved.Add(refIndex);
+                continue;
+            }
+
+            if (selected.Id.HasValue)
+            {
+                var idIndex = Items.FindIndex(i => i.Id == selected.Id);
+                if (idIndex >= 0)
+                {
+                    resolved.Add(idIndex);
+                }
+            }
+        }
+
+        return resolved;
+    }
+
+    private (bool IsValid, string Label) Validate()
+    {
+        if (Required && _selectedIndices.Count == 0)
+        {
+            _isInvalid = true;
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        if (MinSelections.HasValue && _selectedIndices.Count < MinSelections.Value)
+        {
+            _isInvalid = true;
+            StateHasChanged();
+            return (false, Label);
+        }
+
+        _isInvalid = false;
+        StateHasChanged();
+        return (true, Label);
+    }
+
+    private async Task ToggleItemAsync(int index)
+    {
+        if (_selectedIndices.Contains(index))
+        {
+            _selectedIndices.Remove(index);
+        }
+        else
+        {
+            if (MaxSelections.HasValue && _selectedIndices.Count >= MaxSelections.Value)
+            {
+                return;
+            }
+
+            _selectedIndices.Add(index);
+        }
+
+        await CommitSelectionChangeAsync();
+    }
+
+    private async Task ToggleSelectAllAsync()
+    {
+        if (IsDisabled) return;
+
+        if (_selectedIndices.Count == Items.Count)
+        {
+            _selectedIndices.Clear();
+        }
+        else
+        {
+            var limit = MaxSelections ?? Items.Count;
+            _selectedIndices = Enumerable.Range(0, Items.Count)
+                .Take(limit)
+                .ToHashSet();
+        }
+
+        await CommitSelectionChangeAsync();
+    }
+
+    private async Task CommitSelectionChangeAsync()
+    {
+        var newValue = Items
+            .Select((item, idx) => (item, idx))
+            .Where(x => _selectedIndices.Contains(x.idx))
+            .Select(x => x.item)
+            .ToList();
+
+        Value = newValue;
+
+        if (_isInvalid && (_selectedIndices.Count > 0 || Required == false))
+        {
+            _isInvalid = false;
+        }
+
+        await ValueChanged.InvokeAsync(newValue);
+
+        if (AsyncCallBack != null)
+            await AsyncCallBack.Invoke();
+    }
+
+    private string GetContainerBorderCss()
+    {
+        if (_isInvalid)
+            return "border border-red-500 rounded-md";
+
+        return "border border-gray-200 rounded-md";
+    }
+
+    private string GetRowCss(int index)
+    {
+        var selected = _selectedIndices.Contains(index);
+        var baseClasses = "flex items-center justify-between p-3 rounded-lg border transition-colors";
+
+        if (IsDisabled)
+            return selected
+                ? $"{baseClasses} border-accent-200 bg-accent-50 cursor-not-allowed opacity-60"
+                : $"{baseClasses} border-gray-200 bg-gray-50 cursor-not-allowed opacity-60";
+
+        return selected
+            ? $"{baseClasses} border-accent-400 bg-accent-50 cursor-pointer"
+            : $"{baseClasses} border-gray-200 hover:bg-gray-50 cursor-pointer";
+    }
+
+    public void Dispose()
+    {
+    }
+
+    public class MultiSelectableListInputOption
+    {
+        public MultiSelectableListInputOption(int? id, string description, string? subtitle = null)
+        {
+            Id = id;
+            Description = description;
+            Subtitle = subtitle;
+        }
+
+        public int? Id { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string? Subtitle { get; set; }
+    }
+}

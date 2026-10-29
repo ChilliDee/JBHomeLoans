@@ -1,0 +1,26 @@
+﻿@inject IJSRuntime JS
+
+<div @ref="_containerRef"
+     class="grid h-full w-full flex-1 min-h-0 min-w-0"
+     style="grid-template-rows: @($"{CurrentPct}fr {SplitterHeightPx}px {100 - CurrentPct}fr");">
+    @* Top cell *@
+    <div class="min-w-0 min-h-0 overflow-hidden flex flex-col w-full h-full">
+        @Top
+    </div>
+    @* Splitter handle *@
+    <div @ref="_handleRef"
+         class="@SplitterClass cursor-row-resize flex items-center justify-center group rounded-xl cursor-pointer"
+         style="touch-action: none;">
+        <svg class="text-gray-500 group-hover:text-white transition-colors pointer-events-none"
+             width="20" height="4" viewBox="0 0 20 4" fill="currentColor"
+             xmlns="http://www.w3.org/2000/svg">
+            <circle cx="2" cy="2" r="1" />
+            <circle cx="10" cy="2" r="1" />
+            <circle cx="18" cy="2" r="1" />
+        </svg>
+    </div>
+    @* Bottom cell *@
+    <div class="min-w-0 min-h-0 flex flex-col overflow-hidden w-full h-full">
+        @Bottom
+    </div>
+</div>

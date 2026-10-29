@@ -1,0 +1,151 @@
+﻿<div id="@_d.I.ClassName">   
+        <div class="mm-logo-wrap">
+            <div class="mm-logo-inner">
+                <span class="mm-m1">M</span>
+                <span class="mm-m2">M</span>
+            </div>
+            <div class="mm-underline"></div>
+            <div class="mm-tagline">3.0</div>
+            <div class="mm-replay-wrap">
+                <button type="button"
+                        class="mm-replay-btn"
+                        @onclick="async () => {
+                        await _act.ReplayAsync();
+                        await _d.StateUpdate();
+                    }">
+                REPLAY
+            </button>
+        </div>
+    </div>
+        
+</div>
+
+<style>
+    .mm-logo-wrap {
+        background: #0a0a0a;
+        border-radius: 12px;
+        padding: 40px 0 32px;
+        text-align: center;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .mm-logo-inner {
+        display: inline-flex;
+        align-items: flex-end;
+    }
+
+    .mm-m1, .mm-m2 {
+        font-family: Arial Black, sans-serif;
+        font-size: 180px;
+        font-weight: 900;
+        color: white;
+        line-height: 1;
+        display: inline-block;
+    }
+
+    .mm-m1 {
+        animation: mm-slam-left 0.5s cubic-bezier(0.22,1,0.36,1) 0.1s both;
+    }
+
+    .mm-m2 {
+        animation: mm-slam-right 0.5s cubic-bezier(0.22,1,0.36,1) 0.25s both;
+    }
+
+    .mm-underline {
+        height: 6px;
+        background: white;
+        border-radius: 3px;
+        margin: 4px auto 0;
+        width: 360px;
+        transform-origin: center;
+        animation: mm-expand 0.4s cubic-bezier(0.22,1,0.36,1) 0.65s both;
+    }
+
+    .mm-tagline {
+        color: white;
+        font-family: Arial Black, sans-serif;
+        font-size: 32px;
+        font-weight: 900;
+        letter-spacing: 6px;
+        margin-top: 14px;
+        animation: mm-fade-up 0.5s ease-out 0.85s both;
+    }
+
+    .mm-replay-wrap {
+        margin-top: 24px;
+    }
+
+    .mm-replay-btn {
+        background: white;
+        color: #0a0a0a;
+        border: none;
+        border-radius: 6px;
+        padding: 8px 32px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 3px;
+        cursor: pointer;
+    }
+
+        .mm-replay-btn:hover {
+            background: #ddd;
+        }
+
+    @@keyframes mm-slam-left {
+        from {
+            transform: translateX(-300px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    @@keyframes mm-slam-right {
+        from {
+            transform: translateX(300px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+
+    @@keyframes mm-expand {
+        from {
+            transform: scaleX(0);
+        }
+
+        to {
+            transform: scaleX(1);
+        }
+    }
+
+    @@keyframes mm-fade-up {
+        from {
+            transform: translateY(12px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+</style>
+
+<script>
+    window.mmLogoReplay = function () {
+        const els = document.querySelectorAll('.mm-m1, .mm-m2, .mm-underline, .mm-tagline');
+        els.forEach(el => {
+            el.style.animation = 'none';
+            void el.offsetWidth;
+            el.style.animation = '';
+        });
+    };
+</script>

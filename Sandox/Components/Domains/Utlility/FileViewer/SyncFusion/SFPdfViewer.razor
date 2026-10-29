@@ -1,0 +1,18 @@
+﻿@using Syncfusion.Blazor.SfPdfViewer
+
+<SfPdfViewer2 DocumentPath="@_base64Src" Height="600px" Width="100%" />
+
+@code {
+    [Parameter] public byte[] FileBytes { get; set; }
+
+    private string _base64Src;
+
+    protected override void OnParametersSet()
+    {
+        if (FileBytes is { Length: > 0 })
+        {
+            var base64 = Convert.ToBase64String(FileBytes);
+            _base64Src = $"data:application/pdf;base64,{base64}";
+        }
+    }
+}
